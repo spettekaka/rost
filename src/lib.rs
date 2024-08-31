@@ -1,5 +1,4 @@
 #![no_std]
-#![feature(panic_info_message)]
 #![feature(sync_unsafe_cell)]
 
 pub mod arch;
@@ -19,12 +18,7 @@ pub mod uart;
 fn panic(info: &core::panic::PanicInfo) -> ! {
     println!("hart {} aborting: ", arch::riscv::thread_pointer());
     if let Some(p) = info.location() {
-        println!(
-            "line {}, file {}: {}",
-            p.line(),
-            p.file(),
-            info.message().unwrap()
-        );
+        println!("line {}, file {}: {}", p.line(), p.file(), info.message());
     } else {
         println!("no information available.");
     }
