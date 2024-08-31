@@ -1,5 +1,4 @@
 #![no_std]
-#![feature(panic_info_message)]
 #![feature(sync_unsafe_cell)]
 
 pub mod arch;
