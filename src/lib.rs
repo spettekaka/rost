@@ -24,8 +24,6 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     }
 
     loop {
-        unsafe {
-            riscv::asm::wfi();
-        }
+        riscv::asm::wfi();
     }
 }
