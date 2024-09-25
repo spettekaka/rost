@@ -16,9 +16,7 @@ pub fn build_satp(mode: usize, asid: usize, addr: usize) -> usize {
 }
 
 pub fn wait() {
-    unsafe {
-        riscv::asm::wfi();
-    }
+    riscv::asm::wfi();
 }
 
 pub fn uptime() -> Duration {
