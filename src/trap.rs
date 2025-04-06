@@ -5,6 +5,7 @@ use core::arch::{asm, global_asm};
 
 use log::info;
 use riscv::register;
+use riscv::register::stvec::Stvec;
 
 #[derive(Debug, Copy, Clone)]
 pub enum Trap {
@@ -113,10 +114,8 @@ extern "C" fn machine_trap() {
 
     unsafe {
         register::sstatus::set_sie();
-    }
 
-    register::sepc::write(epc);
-    unsafe {
+        register::sepc::write(epc);
         asm!("csrw sstatus, {}", in(reg) sstatus_bits);
     }
 }
@@ -139,7 +138,10 @@ pub unsafe fn enable_interrupts() {
 ///
 /// Set the vector for handling supervisor mode
 pub unsafe fn hartinit() {
-    register::stvec::write(_start_trap as usize, register::stvec::TrapMode::Direct);
+    let mut stvec_data = Stvec::from_bits(0);
+    stvec_data.set_address(_start_trap as usize);
+    stvec_data.set_trap_mode(register::stvec::TrapMode::Direct);
+    register::stvec::write(stvec_data);
 }
 
 extern "C" {

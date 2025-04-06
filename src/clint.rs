@@ -1,7 +1,7 @@
 use crate::arch;
 use core::ptr;
 
-use riscv::register::*;
+use riscv::register::{mtvec::Mtvec, *};
 
 use log::info;
 
@@ -55,7 +55,11 @@ pub fn timer_init() {
 
         mscratch::write(TIMER_SCRATCH[hart].as_ptr() as usize);
 
-        mtvec::write(timervec as usize, stvec::TrapMode::Direct);
+        let mut mtvec_reg = Mtvec::from_bits(0);
+        mtvec_reg.set_address(timervec as usize);
+        mtvec_reg.set_trap_mode(stvec::TrapMode::Direct);
+
+        mtvec::write(mtvec_reg);
 
         mstatus::set_mie();
         mie::set_mtimer();
