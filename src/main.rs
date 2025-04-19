@@ -95,7 +95,6 @@ unsafe fn kmain() -> ! {
     trap::enable_interrupts();
 
     info!("hart #{} ready", arch::riscv::thread_pointer());
-    clint::debug();
 
     loop {
         rost::arch::riscv::wait();
