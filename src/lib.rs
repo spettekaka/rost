@@ -1,6 +1,8 @@
 #![no_std]
 #![feature(sync_unsafe_cell)]
+#![feature(allocator_api)]
 
+pub mod alloc;
 pub mod arch;
 pub mod clint;
 pub mod interrupt;
@@ -9,6 +11,7 @@ pub mod mem;
 pub mod page;
 pub mod plic;
 pub mod rand;
+pub mod slab;
 pub mod symbols;
 pub mod sync;
 pub mod trap;

@@ -9,6 +9,7 @@ use rost::clint;
 use rost::klog;
 use rost::mem;
 use rost::plic;
+use rost::symbols::{HEAP_SIZE, HEAP_START};
 use rost::trap;
 use rost::uart;
 
@@ -84,7 +85,8 @@ unsafe fn kmain() -> ! {
     info!("Initiating hart:{}", arch::riscv::thread_pointer());
     if arch::riscv::thread_pointer() == 0 {
         // Release the other HARTs
-        // BOOT.store(true, Ordering::Relaxed);
+        rost::alloc::LockedHeap::init(HEAP_START(), HEAP_SIZE());
+        BOOT.store(true, Ordering::Relaxed);
     } else {
         while !BOOT.load(Ordering::Relaxed) {
             rost::arch::riscv::wait();
