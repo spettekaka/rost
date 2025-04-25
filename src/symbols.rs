@@ -2,40 +2,40 @@
 use crate::println;
 
 extern "C" {
-    static _sheap: u8;
-    static _eheap: u8;
+    static __sheap: u8;
+    static __eheap: u8;
     static _heap_size: u8;
-    static _sbss: u8;
-    static _ebss: u8;
-    static _srodata: u8;
-    static _sdata: u8;
-    static _edata: u8;
-    static _sstack: u8;
-    static _estack: u8;
-    static _stext: u8;
+    static __sbss: u8;
+    static __ebss: u8;
+    static __srodata: u8;
+    static __sdata: u8;
+    static __edata: u8;
+    static __sstack: u8;
+    static __estack: u8;
+    static __stext: u8;
 }
 
 pub fn KERNEL_STACK_START() -> usize {
     unsafe {
-        return &_sstack as *const u8 as usize;
+        return &__sstack as *const u8 as usize;
     }
 }
 
 pub fn KERNEL_STACK_END() -> usize {
     unsafe {
-        return &_estack as *const u8 as usize;
+        return &__estack as *const u8 as usize;
     }
 }
 
 pub fn HEAP_START() -> usize {
     unsafe {
-        return &_sheap as *const u8 as usize;
+        return &__sheap as *const u8 as usize;
     }
 }
 
 pub fn HEAP_END() -> usize {
     unsafe {
-        return &_eheap as *const u8 as usize;
+        return &__eheap as *const u8 as usize;
     }
 }
 
@@ -47,42 +47,42 @@ pub fn HEAP_SIZE() -> usize {
 
 pub fn TEXT_START() -> usize {
     unsafe {
-        return &_stext as *const u8 as usize;
+        return &__stext as *const u8 as usize;
     }
 }
 
 pub fn RODATA_START() -> usize {
     unsafe {
-        return &_sdata as *const u8 as usize;
+        return &__sdata as *const u8 as usize;
     }
 }
 
 pub fn RODATA_END() -> usize {
     unsafe {
-        return &_edata as *const u8 as usize;
+        return &__edata as *const u8 as usize;
     }
 }
 pub fn DATA_START() -> usize {
     unsafe {
-        return &_sdata as *const u8 as usize;
+        return &__sdata as *const u8 as usize;
     }
 }
 
 pub fn DATA_END() -> usize {
     unsafe {
-        return &_edata as *const u8 as usize;
+        return &__edata as *const u8 as usize;
     }
 }
 
 pub fn BSS_START() -> usize {
     unsafe {
-        return &_sbss as *const u8 as usize;
+        return &__sbss as *const u8 as usize;
     }
 }
 
 pub fn BSS_END() -> usize {
     unsafe {
-        return &_ebss as *const u8 as usize;
+        return &__ebss as *const u8 as usize;
     }
 }
 
