@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 use crate::println;
 
-extern "C" {
+unsafe extern "C" {
     static __sheap: u8;
     static __eheap: u8;
     static _heap_size: u8;

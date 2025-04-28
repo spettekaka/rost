@@ -28,7 +28,7 @@ fn timer_interrupt() {
 ///
 /// Either a plic interrupt or a timer interrupt forwarded from
 /// machine mode
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub fn handle_interrupt(code: u32) {
     match code {
         9 => plic_interrupt(),

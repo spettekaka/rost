@@ -24,7 +24,7 @@ impl Slab {
         Self {
             capacity: n_blocks,
             size: block_size,
-            free_list: FreeList::new(start_addr, n_blocks, block_size),
+            free_list: unsafe { FreeList::new(start_addr, n_blocks, block_size) },
         }
     }
 
@@ -61,7 +61,7 @@ impl FreeList {
 
         for i in (0..blocks).rev() {
             let block = (start_addr + i * block_size) as *mut FreeBlock;
-            free_list.push(&mut *block);
+            unsafe { free_list.push(&mut *block) };
         }
         free_list
     }

@@ -17,21 +17,23 @@ const MAX_HARTS: usize = 8;
 static mut TIMER_SCRATCH: [[u64; 5]; MAX_HARTS] = [[0u64; 5]; MAX_HARTS];
 
 unsafe fn read_mtime() -> u64 {
-    ptr::read_volatile((CLINT_BASE + CLINT_MTIME_OFFSET) as *const u64)
+    unsafe { ptr::read_volatile((CLINT_BASE + CLINT_MTIME_OFFSET) as *const u64) }
 }
 
 unsafe fn read_mtimecmp(hart: usize) -> u64 {
-    ptr::read_volatile((CLINT_BASE + 8 * hart + CLINT_MTIMECMP_OFFSET) as *const u64)
+    unsafe { ptr::read_volatile((CLINT_BASE + 8 * hart + CLINT_MTIMECMP_OFFSET) as *const u64) }
 }
 
 unsafe fn write_mtimecmp(hart: usize, val: u64) {
     let addr = (CLINT_BASE + 8 * hart + CLINT_MTIMECMP_OFFSET) as *mut u64;
-    ptr::write_volatile(addr, val);
+    unsafe { ptr::write_volatile(addr, val) };
 }
 
 unsafe fn increment_mtimecmp(hart: usize, interval: u64) {
-    let current = read_mtime();
-    write_mtimecmp(hart, current + interval);
+    unsafe {
+        let current = read_mtime();
+        write_mtimecmp(hart, current + interval)
+    };
 }
 
 fn mtiecmp_hart() -> usize {
@@ -43,7 +45,7 @@ pub fn timer_init() {
     info!("Enabling timer interrupts");
     // Enable machine mode timer interrupts
     unsafe {
-        extern "C" {
+        unsafe extern "C" {
             fn timervec();
         }
 

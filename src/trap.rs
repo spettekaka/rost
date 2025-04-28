@@ -36,8 +36,8 @@ pub enum Trap {
     Reserved,
 }
 
-#[no_mangle]
-extern "C" fn machine_trap() {
+#[unsafe(no_mangle)]
+unsafe extern "C" fn machine_trap() {
     let epc = register::sepc::read();
     let tval = register::stval::read();
     let cause = register::scause::read();
@@ -126,12 +126,14 @@ extern "C" fn machine_trap() {
 pub unsafe fn enable_interrupts() {
     info!("Enabling interrutps");
     // enable interrupts
-    register::sstatus::set_sie();
-    register::sstatus::set_spp(register::sstatus::SPP::Supervisor);
-    // enable software interrupt
-    register::sie::set_ssoft();
-    register::sie::set_sext();
-    register::sie::set_stimer();
+    unsafe {
+        register::sstatus::set_sie();
+        register::sstatus::set_spp(register::sstatus::SPP::Supervisor);
+        // enable software interrupt
+        register::sie::set_ssoft();
+        register::sie::set_sext();
+        register::sie::set_stimer();
+    }
 }
 
 /// Hart init
@@ -141,10 +143,10 @@ pub unsafe fn hartinit() {
     let mut stvec_data = Stvec::from_bits(0);
     stvec_data.set_address(_start_trap as usize);
     stvec_data.set_trap_mode(register::stvec::TrapMode::Direct);
-    register::stvec::write(stvec_data);
+    unsafe { register::stvec::write(stvec_data) };
 }
 
-extern "C" {
+unsafe extern "C" {
     fn _start_trap();
 }
 

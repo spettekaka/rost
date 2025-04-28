@@ -13,7 +13,7 @@ use rost::symbols::{HEAP_SIZE, HEAP_START};
 use rost::trap;
 use rost::uart;
 
-use log::{info, LevelFilter};
+use log::{LevelFilter, info};
 
 use riscv::register::*;
 use riscv_rt::entry;
@@ -22,7 +22,7 @@ use riscv_rt::entry;
 /// is initated and interrupts are turned on
 static BOOT: AtomicBool = AtomicBool::new(false);
 
-extern "C" {
+unsafe extern "C" {
     fn goto_supervised();
 }
 
@@ -49,29 +49,31 @@ goto_supervised:
 /// Initiates the kernel
 ///
 /// Go to supervised mode when initialization is done
-#[entry]
+#[unsafe(entry)]
 unsafe fn kinit() -> ! {
-    if mhartid::read() == 0 {
-        klog::init(LevelFilter::Trace).expect("Failed to setup logger");
-        uart::Uart::new(uart::UART_BASE_ADDR).init();
+    unsafe {
+        if mhartid::read() == 0 {
+            klog::init(LevelFilter::Trace).expect("Failed to setup logger");
+            uart::Uart::new(uart::UART_BASE_ADDR).init();
 
-        info!("Booting Rost ...");
-        info!("Current hart: {}", mhartid::read());
+            info!("Booting Rost ...");
+            info!("Current hart: {}", mhartid::read());
 
-        mem::init();
-        plic::init();
-        mem::enable_mmu();
-        trap::hartinit();
-        plic::hartinit();
-        clint::timer_init();
+            mem::init();
+            plic::init();
+            mem::enable_mmu();
+            trap::hartinit();
+            plic::hartinit();
+            clint::timer_init();
+        }
+
+        info!("Jumping to supervisor mode");
+
+        mstatus::set_mpp(mstatus::MPP::Supervisor);
+        mepc::write(kmain as usize);
+
+        goto_supervised();
     }
-
-    info!("Jumping to supervisor mode");
-
-    mstatus::set_mpp(mstatus::MPP::Supervisor);
-    mepc::write(kmain as usize);
-
-    goto_supervised();
 
     loop {
         rost::arch::riscv::wait();
@@ -80,12 +82,12 @@ unsafe fn kinit() -> ! {
 
 /// Kernel main
 /// Never returns.
-#[no_mangle]
+#[unsafe(no_mangle)]
 unsafe fn kmain() -> ! {
     info!("Initiating hart:{}", arch::riscv::thread_pointer());
     if arch::riscv::thread_pointer() == 0 {
         // Release the other HARTs
-        rost::alloc::LockedHeap::init(HEAP_START(), HEAP_SIZE());
+        unsafe { rost::alloc::LockedHeap::init(HEAP_START(), HEAP_SIZE()) };
         BOOT.store(true, Ordering::Relaxed);
     } else {
         while !BOOT.load(Ordering::Relaxed) {
@@ -94,7 +96,9 @@ unsafe fn kmain() -> ! {
         hartinit();
     }
 
-    trap::enable_interrupts();
+    unsafe {
+        trap::enable_interrupts();
+    }
 
     info!("hart #{} ready", arch::riscv::thread_pointer());
 

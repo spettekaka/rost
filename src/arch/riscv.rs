@@ -52,6 +52,7 @@ pub fn thread_pointer() -> usize {
 
 pub unsafe fn clear_sie_ssoft() {
     const SSIP: usize = 1 << 1;
-
-    asm!("csrc sip, {}", in(reg) SSIP);
+    unsafe {
+        asm!("csrc sip, {}", in(reg) SSIP);
+    }
 }

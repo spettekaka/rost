@@ -81,7 +81,7 @@ impl Plic {
     /// Enables an interrupt id.
     pub unsafe fn init(&mut self, id: InterruptId) {
         let enabled = PLIC_BASE as *mut u32;
-        enabled.add(id as usize).write_volatile(1);
+        unsafe { enabled.add(id as usize).write_volatile(1) };
     }
 
     /// Enable an interrupt id.
@@ -198,7 +198,7 @@ pub fn plic() -> &'static mut Plic {
 pub unsafe fn init() {
     info!("Initating PLIC");
     let plic = plic();
-    plic.init(InterruptId::Uart0);
+    unsafe { plic.init(InterruptId::Uart0) };
 }
 
 /// Initiate the plic for the current HART

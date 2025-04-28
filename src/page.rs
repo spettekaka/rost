@@ -17,7 +17,7 @@ static mut PAGE_ALLOC_START: usize = 0;
 
 pub static mut KERNEL_PAGE_TABLE: SyncUnsafeCell<PageTable> = SyncUnsafeCell::new(PageTable::new());
 
-extern "C" {
+unsafe extern "C" {
     static _sheap: u8;
     static _eheap: u8;
     static _heap_size: u8;
@@ -46,7 +46,7 @@ pub fn init() {
             (*ptr.add(i)).clear();
         }
 
-        PAGE_ALLOC_START = align_val(HEAP_START() + PAGES + size_of::<Page>(), PAGE_ORDER);
+        PAGE_ALLOC_START = align_val(HEAP_START() + PAGES * size_of::<Page>(), PAGE_ORDER);
     }
 }
 

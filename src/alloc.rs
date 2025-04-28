@@ -28,16 +28,18 @@ pub struct Heap {
 impl Heap {
     pub unsafe fn new(start_addr: usize, heap_size: usize) -> Self {
         let slab_size = heap_size / NUM_SLABS;
-        Self {
-            slabs: [
-                Slab::init(start_addr, slab_size, 64),
-                Slab::init(start_addr + slab_size, slab_size, 128),
-                Slab::init(start_addr + slab_size * 2, slab_size, 256),
-                Slab::init(start_addr + slab_size * 3, slab_size, 512),
-                Slab::init(start_addr + slab_size * 4, slab_size, 1024),
-                Slab::init(start_addr + slab_size * 5, slab_size, 2048),
-                Slab::init(start_addr + slab_size * 6, slab_size, 4096),
-            ],
+        unsafe {
+            Self {
+                slabs: [
+                    Slab::init(start_addr, slab_size, 64),
+                    Slab::init(start_addr + slab_size, slab_size, 128),
+                    Slab::init(start_addr + slab_size * 2, slab_size, 256),
+                    Slab::init(start_addr + slab_size * 3, slab_size, 512),
+                    Slab::init(start_addr + slab_size * 4, slab_size, 1024),
+                    Slab::init(start_addr + slab_size * 5, slab_size, 2048),
+                    Slab::init(start_addr + slab_size * 6, slab_size, 4096),
+                ],
+            }
         }
     }
 
@@ -91,7 +93,9 @@ impl LockedHeap {
             "Initiating allocator. Start addr: 0x{:x}, size: {}",
             start_addr, size
         );
-        *ALLOCATOR.0.lock().unwrap() = Some(Heap::new(start_addr, size));
+        unsafe {
+            *ALLOCATOR.0.lock().unwrap() = Some(Heap::new(start_addr, size));
+        }
     }
 }
 
