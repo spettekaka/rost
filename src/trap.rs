@@ -141,7 +141,7 @@ pub unsafe fn enable_interrupts() {
 /// Set the vector for handling supervisor mode
 pub unsafe fn hartinit() {
     let mut stvec_data = Stvec::from_bits(0);
-    stvec_data.set_address(_start_trap as usize);
+    stvec_data.set_address(_start_trap as *const () as usize);
     stvec_data.set_trap_mode(register::stvec::TrapMode::Direct);
     unsafe { register::stvec::write(stvec_data) };
 }

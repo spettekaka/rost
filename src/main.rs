@@ -49,7 +49,7 @@ goto_supervised:
 /// Initiates the kernel
 ///
 /// Go to supervised mode when initialization is done
-#[unsafe(entry)]
+#[entry]
 unsafe fn kinit() -> ! {
     unsafe {
         if mhartid::read() == 0 {
@@ -70,7 +70,7 @@ unsafe fn kinit() -> ! {
         info!("Jumping to supervisor mode");
 
         mstatus::set_mpp(mstatus::MPP::Supervisor);
-        mepc::write(kmain as usize);
+        mepc::write(kmain as *const () as usize);
 
         goto_supervised();
     }

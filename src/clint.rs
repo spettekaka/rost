@@ -58,7 +58,7 @@ pub fn timer_init() {
         mscratch::write(TIMER_SCRATCH[hart].as_ptr() as usize);
 
         let mut mtvec_reg = Mtvec::from_bits(0);
-        mtvec_reg.set_address(timervec as usize);
+        mtvec_reg.set_address(timervec as *const () as usize);
         mtvec_reg.set_trap_mode(stvec::TrapMode::Direct);
 
         mtvec::write(mtvec_reg);

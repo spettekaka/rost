@@ -27,7 +27,7 @@ impl<T> Mutex<T> {
         }
     }
 
-    pub fn lock(&self) -> Result<MutexGuard<T>, MutexError> {
+    pub fn lock(&self) -> Result<MutexGuard<'_, T>, MutexError> {
         loop {
             match self
                 .status
