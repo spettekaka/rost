@@ -81,13 +81,18 @@ unsafe fn kinit() -> ! {
 }
 
 /// Kernel main
+///
+/// Initiates each hart and the allocator.
+///
 /// Never returns.
 #[unsafe(no_mangle)]
 unsafe fn kmain() -> ! {
     info!("Initiating hart:{}", arch::riscv::thread_pointer());
     if arch::riscv::thread_pointer() == 0 {
-        // Release the other HARTs
+        // Setup allocator
         unsafe { rost::alloc::LockedHeap::init(HEAP_START(), HEAP_SIZE()) };
+
+        // Release the other HARTs
         BOOT.store(true, Ordering::Relaxed);
     } else {
         while !BOOT.load(Ordering::Relaxed) {
@@ -100,7 +105,7 @@ unsafe fn kmain() -> ! {
         trap::enable_interrupts();
     }
 
-    info!("hart #{} ready", arch::riscv::thread_pointer());
+    info!("Hart #{} ready", arch::riscv::thread_pointer());
 
     loop {
         rost::arch::riscv::wait();
