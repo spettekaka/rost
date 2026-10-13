@@ -1,6 +1,5 @@
 #![no_std]
 #![feature(sync_unsafe_cell)]
-#![feature(allocator_api)]
 
 pub mod alloc;
 pub mod arch;
