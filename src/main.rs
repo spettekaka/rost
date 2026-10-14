@@ -82,7 +82,7 @@ unsafe fn kinit() -> ! {
 /// Never returns.
 #[unsafe(no_mangle)]
 unsafe fn kmain() -> ! {
-    info!("Initiating hart:{}", arch::riscv::thread_pointer());
+    info!("Initiating hart: {}", arch::riscv::thread_pointer());
     if arch::riscv::thread_pointer() == 0 {
         // Setup allocator
         unsafe { rost::alloc::LockedHeap::init(HEAP_START(), HEAP_SIZE()) };
