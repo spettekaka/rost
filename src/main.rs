@@ -1,7 +1,7 @@
 #![no_std]
 #![no_main]
 
-use core::arch::global_asm;
+use core::arch::asm;
 use core::sync::atomic::{AtomicBool, Ordering};
 
 use rost::arch;
@@ -22,30 +22,6 @@ use riscv_rt::entry;
 /// is initated and interrupts are turned on
 static BOOT: AtomicBool = AtomicBool::new(false);
 
-unsafe extern "C" {
-    fn goto_supervised();
-}
-
-global_asm!(
-    r#"
-.global goto_supervised
-.align 4
-goto_supervised:
-    csrw satp, zero # Disable paging
-    csrw pmpcfg0, 0xf
-    # Delegate interrupts to supervisor mode
-    li t0, 0xffff
-    csrw medeleg, t0
-    li t0, 0xffff
-    csrw mideleg, t0
-    # Save hart id
-    csrr a1, mhartid
-    mv tp, a1
-    # Switch to supervisor mode
-    mret
-"#
-);
-
 /// Initiates the kernel
 ///
 /// Go to supervised mode when initialization is done
@@ -53,6 +29,7 @@ goto_supervised:
 unsafe fn kinit() -> ! {
     unsafe {
         if mhartid::read() == 0 {
+            // Perform init that should only execute once
             klog::init(LevelFilter::Trace).expect("Failed to setup logger");
             uart::Uart::new(uart::UART_BASE_ADDR).init();
 
@@ -67,12 +44,30 @@ unsafe fn kinit() -> ! {
             clint::timer_init();
         }
 
-        info!("Jumping to supervisor mode");
+        info!("Preparing for supervisor mode");
 
+        // Set next mode to supervisor
         mstatus::set_mpp(mstatus::MPP::Supervisor);
         mepc::write(kmain as *const () as usize);
 
-        goto_supervised();
+        // Disable paging during transition
+        let value = satp::Satp::from_bits(satp::Mode::Bare.into());
+        satp::write(value);
+
+        // Handle interupts in supervisor mode
+        let value = medeleg::Medeleg::from_bits(medeleg::Medeleg::BITMASK);
+        medeleg::write(value);
+
+        let value = mideleg::Mideleg::from_bits(mideleg::Mideleg::BITMASK);
+        mideleg::write(value);
+
+        // Give access to physical memory
+        pmpaddr0::write(0x3fffffffffffff);
+        pmpcfg0::set_pmp(0, Range::TOR, Permission::RWX, false);
+
+        info!("Jumping to supervisor mode");
+        // switch to supervisor mode and jump to kmain().
+        asm!("mret");
     }
 
     loop {
