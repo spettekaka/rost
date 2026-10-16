@@ -186,6 +186,7 @@ pub enum Attribute {
     UserRead = 0b10010,
     UserReadWrite = 0b10110,
     UserReadExecute = 0b11010,
+    MMIO = 0b11000111,
 }
 
 impl Entry {
