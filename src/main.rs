@@ -1,6 +1,8 @@
 #![no_std]
 #![no_main]
 
+extern crate alloc;
+
 use core::arch::asm;
 use core::sync::atomic::{AtomicBool, Ordering};
 
@@ -12,6 +14,7 @@ use rost::plic;
 use rost::symbols::{HEAP_SIZE, HEAP_START};
 use rost::trap;
 use rost::uart;
+use rost::virtio;
 
 use log::{LevelFilter, info};
 
@@ -62,8 +65,8 @@ unsafe fn kinit() -> ! {
         mideleg::write(value);
 
         // Give access to physical memory
-        pmpaddr0::write(0x3fffffffffffff);
-        pmpcfg0::set_pmp(0, Range::TOR, Permission::RWX, false);
+        pmpaddr0::write(usize::MAX);
+        pmpcfg0::set_pmp(0, Range::NAPOT, Permission::RWX, false);
 
         info!("Jumping to supervisor mode");
         // switch to supervisor mode and jump to kmain().
@@ -85,12 +88,17 @@ unsafe fn kmain() -> ! {
     info!("Initiating hart: {}", arch::riscv::thread_pointer());
     if arch::riscv::thread_pointer() == 0 {
         // Setup allocator
-        unsafe { rost::alloc::LockedHeap::init(HEAP_START(), HEAP_SIZE()) };
+        unsafe {
+            rost::alloc::LockedHeap::init(HEAP_START(), HEAP_SIZE());
 
+            // Probe virtio
+            let virtio_bus = virtio::VirtIOBus::probe();
+            virtio_bus.dump();
+        };
         // Release the other HARTs
         BOOT.store(true, Ordering::Relaxed);
     } else {
-        while !BOOT.load(Ordering::Relaxed) {
+        while !BOOT.load(Ordering::Acquire) {
             rost::arch::riscv::wait();
         }
         hartinit();
