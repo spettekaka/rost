@@ -15,6 +15,7 @@ use rost::symbols::{HEAP_SIZE, HEAP_START};
 use rost::trap;
 use rost::uart;
 use rost::virtio;
+use rost::virtio::rng;
 
 use log::{LevelFilter, info};
 
@@ -94,6 +95,13 @@ unsafe fn kmain() -> ! {
             // Probe virtio
             let virtio_bus = virtio::VirtIOBus::probe();
             virtio_bus.dump();
+
+            if let Some(rng_device) = virtio_bus
+                .filter_by_type(virtio::VirtIODeviceType::EntropySource)
+                .next()
+            {
+                let _rng_device = rng::VirtIORng::init(*rng_device).unwrap();
+            }
         };
         // Release the other HARTs
         BOOT.store(true, Ordering::Relaxed);
