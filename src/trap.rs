@@ -124,7 +124,7 @@ unsafe extern "C" fn machine_trap() {
 ///
 /// We handle all interrupts in supervisor mode
 pub unsafe fn enable_interrupts() {
-    info!("Enabling interrutps");
+    info!("Enabling interrupts");
     // enable interrupts
     unsafe {
         register::sstatus::set_sie();
