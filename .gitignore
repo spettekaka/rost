@@ -1,3 +1,5 @@
 /target
 Cargo.lock
 tags
+.DS_Store
+index.html
