@@ -87,6 +87,6 @@ impl FreeList {
 
 impl FreeBlock {
     fn addr(&self) -> usize {
-        ptr::addr_of!(self) as usize
+        ptr::from_ref(self).addr()
     }
 }
