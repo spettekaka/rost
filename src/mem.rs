@@ -4,6 +4,7 @@ use crate::page::{self, Attribute, KERNEL_PAGE_TABLE};
 use crate::plic::PLIC_BASE;
 use crate::symbols::*;
 use crate::uart;
+use crate::virtio::{VIRTIO_MMIO_BASE, VIRTIO_MMIO_STRIDE, VIRTIO_SLOTS};
 
 use log::info;
 
@@ -88,6 +89,12 @@ pub unsafe fn init() {
                 CLINT_BASE + CLINT_SIZE,
                 Attribute::ReadWrite,
                 "CLINT",
+            ),
+            Region::new(
+                VIRTIO_MMIO_BASE,
+                VIRTIO_MMIO_BASE + (VIRTIO_SLOTS * VIRTIO_MMIO_STRIDE),
+                Attribute::MMIO,
+                "VirtIO",
             ),
         ];
 

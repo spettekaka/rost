@@ -7,6 +7,7 @@ pub mod clint;
 pub mod interrupt;
 pub mod klog;
 pub mod mem;
+pub mod mmio;
 pub mod page;
 pub mod plic;
 pub mod rand;
@@ -15,6 +16,7 @@ pub mod symbols;
 pub mod sync;
 pub mod trap;
 pub mod uart;
+pub mod virtio;
 
 /// Panic handler
 #[panic_handler]
