@@ -2,12 +2,10 @@ extern crate alloc;
 use alloc::vec::Vec;
 use log::info;
 
-use core::ptr::addr_of;
-use core::ptr::read_volatile;
+use crate::virtio::virtio_mmio::LegacyMmioTransport;
 
-use crate::mmio;
-
-// pub mod queue;
+pub mod rng;
+pub mod virtio_mmio;
 
 pub const VIRTIO_MMIO_BASE: usize = 0x1000_1000;
 pub const VIRTIO_MMIO_STRIDE: usize = 0x1000;
@@ -59,14 +57,54 @@ pub enum IORegisterOffset {
     ISRStatus = 0x13,
 }
 
-pub enum StatusFlags {
-    Clear = 0x0,
-    Ack = 0x1,
-    Loaded = 0x2,
-    Ready = 0x4,
-    FeatureOK = 0x8,
-    Error = 0x64,
-    Failed = 0x128,
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct DeviceStatus(pub u32);
+
+impl DeviceStatus {
+    pub const CLEAR: Self = Self(0x0);
+    pub const ACK: Self = Self(0x1);
+    pub const DRIVER: Self = Self(0x2);
+    pub const DRIVER_OK: Self = Self(0x4);
+    pub const FEATURES_OK: Self = Self(0x8);
+    pub const ERROR: Self = Self(0x64);
+    pub const FAILED: Self = Self(0x128);
+
+    pub const fn empty() -> Self {
+        Self(0)
+    }
+
+    pub const fn contains(&self, other: Self) -> bool {
+        (self.0 & other.0) == other.0
+    }
+
+    pub const fn set(&mut self, other: Self) {
+        self.0 |= other.0;
+    }
+
+    pub const fn clear(&mut self, other: Self) {
+        self.0 &= !other.0;
+    }
+}
+
+impl core::ops::BitOr for DeviceStatus {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl core::ops::BitOrAssign for DeviceStatus {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.set(rhs);
+    }
+}
+
+impl From<DeviceStatus> for u32 {
+    fn from(value: DeviceStatus) -> Self {
+        value.0
+    }
 }
 
 pub mod device {
@@ -119,72 +157,10 @@ impl VirtIODevice {
         self.vendor_id
     }
 
-    pub fn registers(&self) -> *mut VirtioMMIOBlock {
-        self.addr as *mut VirtioMMIOBlock
+    pub fn registers(&self) -> LegacyMmioTransport {
+        LegacyMmioTransport::new(self.addr)
     }
 }
-
-#[repr(C)]
-pub struct VirtioMMIOBlock {
-    pub magic_value: u32,         // 0x000: "virt" (0x74726976)
-    pub version: u32,             // 0x004: 0x2 for Modern VirtIO
-    pub device_id: u32,           // 0x008:
-    pub vendor_id: u32,           // 0x00C: 0x554d4551 ("QEMU")
-    pub device_features: u32,     // 0x010
-    pub device_features_sel: u32, // 0x014
-    _pad1: [u32; 2],
-    pub driver_features: u32,     // 0x020
-    pub driver_features_sel: u32, // 0x024
-    _pad2: [u32; 2],
-    pub queue_sel: u32,     // 0x030: Select queue index
-    pub queue_num_max: u32, // 0x034: Max size supported by device
-    pub queue_num: u32,     // 0x038: Selected queue size
-    _pad3: [u32; 2],
-    pub queue_ready: u32, // 0x044: Queue ready flag (1 = active)
-    _pad4: [u32; 6],
-    pub queue_notify: u32, // 0x050: Write queue index here to kick device
-    _pad5: [u32; 7],
-    pub interrupt_status: u32, // 0x060
-    pub interrupt_ack: u32,    // 0x064
-    _pad6: [u32; 2],
-    pub status: u32, // 0x070: Device status bitfield
-    _pad7: [u32; 3],
-    pub queue_desc_low: u32, // 0x080: Low 32-bits physical addr of Desc Table
-    pub queue_desc_high: u32, // 0x084: High 32-bits
-    _pad8: [u32; 2],
-    pub queue_driver_low: u32, // 0x090: Low 32-bits physical addr of Avail Ring
-    pub queue_driver_high: u32, // 0x094: High 32-bits
-    _pad9: [u32; 2],
-    pub queue_device_low: u32, // 0x0A0: Low 32-bits physical addr of Used Ring
-    pub queue_device_high: u32, // 0x0A4: High 32-bits
-}
-
-impl VirtioMMIOBlock {
-    pub fn meta(&self) -> Option<(u32, u32, u32, u32)> {
-        unsafe {
-            match mmio::safe_mmio_read_u32(addr_of!(self.magic_value)) {
-                Some(magic) if magic == VIRTIO_MAGIC => {
-                    let version = read_volatile(&self.version);
-                    let device_id = read_volatile(&self.device_id);
-                    let vendor_id = read_volatile(&self.vendor_id);
-                    Some((magic, version, device_id, vendor_id))
-                }
-                _ => None,
-            }
-        }
-    }
-
-    pub fn is_valid(&self) -> bool {
-        if let Some((magic, version, device_id, _)) = self.meta() {
-            magic == VIRTIO_MAGIC
-                && version == 1
-                && VirtIODeviceType::from(device_id) != VirtIODeviceType::Unknown(device_id)
-        } else {
-            false
-        }
-    }
-}
-
 pub struct VirtIOBus {
     devices: Vec<VirtIODevice>,
 }
@@ -192,20 +168,19 @@ pub struct VirtIOBus {
 impl VirtIOBus {
     pub unsafe fn probe() -> Self {
         let mut devices = Vec::new();
-        unsafe {
-            for i in 0..VIRTIO_SLOTS {
-                let base_addr = VIRTIO_MMIO_BASE + (i * VIRTIO_MMIO_STRIDE);
-                let mmio = base_addr as *mut VirtioMMIOBlock;
+        for i in 0..VIRTIO_SLOTS {
+            let base_addr = VIRTIO_MMIO_BASE + (i * VIRTIO_MMIO_STRIDE);
 
-                if let Some((_magic, _version, device_id, vendor_id)) = (*mmio).meta() {
-                    if (*mmio).is_valid() {
-                        devices.push(VirtIODevice {
-                            slot: i,
-                            addr: base_addr,
-                            device_type: VirtIODeviceType::from(device_id),
-                            vendor_id,
-                        });
-                    }
+            let mmio = LegacyMmioTransport::new(base_addr);
+
+            if let Some((_magic, _version, device_id, vendor_id)) = mmio.meta() {
+                if mmio.is_valid() {
+                    devices.push(VirtIODevice {
+                        slot: i,
+                        addr: base_addr,
+                        device_type: VirtIODeviceType::from(device_id),
+                        vendor_id,
+                    });
                 }
             }
         }
@@ -230,6 +205,7 @@ impl VirtIOBus {
         for device in self.iter() {
             info!("\t Slot {:X}: {:?}", device.slot(), device.device_type());
         }
+        info!("----- \t -----");
     }
 }
 
