@@ -57,6 +57,14 @@ impl From<Threshold> for Priority {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum InterruptId {
     Unknown = 0,
+    Virtio0 = 1,
+    Virtio1 = 2,
+    Virtio2 = 3,
+    Virtio3 = 4,
+    Virtio4 = 5,
+    Virtio5 = 6,
+    Virtio6 = 7,
+    Virtio7 = 8,
     Uart0 = 10,
 }
 
@@ -64,6 +72,14 @@ impl From<u32> for InterruptId {
     fn from(irq: u32) -> Self {
         match irq {
             10 => Self::Uart0,
+            8 => Self::Virtio7,
+            7 => Self::Virtio6,
+            6 => Self::Virtio5,
+            5 => Self::Virtio4,
+            4 => Self::Virtio3,
+            3 => Self::Virtio2,
+            2 => Self::Virtio1,
+            1 => Self::Virtio0,
             _ => Self::Unknown,
         }
     }
@@ -199,12 +215,15 @@ pub unsafe fn init() {
     info!("Initating PLIC");
     let plic = plic();
     unsafe { plic.init(InterruptId::Uart0) };
+    unsafe { plic.init(InterruptId::Virtio7) };
 }
 
 /// Initiate the plic for the current HART
 pub fn hartinit() {
     let plic = plic();
     plic.enable(InterruptId::Uart0);
+    plic.enable(InterruptId::Virtio7);
     plic.set_threshold(Threshold::All);
     plic.set_priority(InterruptId::Uart0, Priority::One);
+    plic.set_priority(InterruptId::Virtio7, Priority::One);
 }

@@ -15,7 +15,7 @@ use rost::symbols::{HEAP_SIZE, HEAP_START};
 use rost::trap;
 use rost::uart;
 use rost::virtio;
-use rost::virtio::rng;
+use rost::virtio::rng::{self, ENTROPY_READY};
 
 use log::{LevelFilter, info};
 
@@ -89,25 +89,7 @@ unsafe fn kmain() -> ! {
     info!("Initiating hart: {}", arch::riscv::thread_pointer());
     if arch::riscv::thread_pointer() == 0 {
         // Setup allocator
-        unsafe {
-            rost::alloc::LockedHeap::init(HEAP_START(), HEAP_SIZE());
-
-            // Probe virtio
-            let virtio_bus = virtio::VirtIOBus::probe();
-            virtio_bus.dump();
-
-            if let Some(rng_device) = virtio_bus
-                .filter_by_type(virtio::VirtIODeviceType::EntropySource)
-                .next()
-            {
-                let mut rng_device = rng::VirtIORng::init(*rng_device).unwrap();
-                let mut entropy = [0u8; 32];
-
-                rng_device.request_entropy(&mut entropy);
-
-                info!("{:?}", entropy);
-            }
-        };
+        unsafe { rost::alloc::LockedHeap::init(HEAP_START(), HEAP_SIZE()) };
         // Release the other HARTs
         BOOT.store(true, Ordering::Relaxed);
     } else {
@@ -122,7 +104,27 @@ unsafe fn kmain() -> ! {
     }
 
     info!("Hart #{} ready", arch::riscv::thread_pointer());
+    unsafe {
+        // Probe virtio
+        let virtio_bus = virtio::VirtIOBus::probe();
+        virtio_bus.dump();
 
+        if let Some(rng_device) = virtio_bus
+            .filter_by_type(virtio::VirtIODeviceType::EntropySource)
+            .next()
+        {
+            let mut rng_device = rng::VirtIORng::init(*rng_device).unwrap();
+            let mut entropy = [0u8; 32];
+
+            rng_device.request_entropy(&mut entropy);
+
+            while !ENTROPY_READY.load(Ordering::Acquire) {
+                rost::arch::riscv::wait();
+            }
+
+            info!("{:?}", entropy);
+        }
+    };
     loop {
         rost::arch::riscv::wait();
     }

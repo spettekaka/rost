@@ -1,12 +1,15 @@
 use core::ptr::{read_volatile, write_volatile};
-use core::sync::atomic::{Ordering, fence};
+use core::sync::atomic::{AtomicBool, Ordering, fence};
 
 use crate::virtio::common::{LegacyVirtqueue, QUEUE_SIZE};
 use crate::virtio::virtio_mmio::PAGE_SIZE;
 use crate::virtio::{DescFlags, DeviceStatus, VirtIODevice};
 
 // TODO: Use page allocator to get memory, will require changes to legacy virtqueue
-static mut RNG_QUEUE: LegacyVirtqueue = unsafe { core::mem::zeroed() };
+pub static mut RNG_QUEUE: LegacyVirtqueue = unsafe { core::mem::zeroed() };
+
+// Atomic flag so main kernel code knows when the interrupt has finished filling the buffer
+pub static ENTROPY_READY: AtomicBool = AtomicBool::new(false);
 
 pub struct VirtIORng {
     dev: VirtIODevice,
@@ -42,6 +45,9 @@ impl VirtIORng {
         let mut mmio = self.dev.registers();
 
         unsafe {
+            // Ensure interrupts are NOT suppressed on the available ring
+            write_volatile(&raw mut RNG_QUEUE.avail.flags, 0);
+
             // Populate descriptor 0
             write_volatile(&mut RNG_QUEUE.desc[0].addr, buf.as_mut_ptr() as u64);
             write_volatile(&mut RNG_QUEUE.desc[0].len, buf.len() as u32);
@@ -62,15 +68,7 @@ impl VirtIORng {
             fence(Ordering::SeqCst);
 
             //  Notify Queue 0
-            let last_used = read_volatile(&raw const RNG_QUEUE.used.index);
             mmio.notify_queue(0);
-
-            //  Spin-wait until used index is incremented, indicates that entropy had been fetched
-            while read_volatile(&raw mut RNG_QUEUE.used.index) == last_used {
-                for _ in 0..100_000 {
-                    core::hint::spin_loop();
-                }
-            }
         }
     }
 }

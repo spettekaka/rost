@@ -118,6 +118,14 @@ impl LegacyMmioTransport {
         self.write_reg(LegacyMmioRegister::QueueNotify, index);
     }
 
+    pub fn interrupt_status(&mut self) -> u32 {
+        self.read_reg(LegacyMmioRegister::InterruptStatus)
+    }
+
+    pub fn ack_interrupt(&mut self, status: u32) {
+        self.write_reg(LegacyMmioRegister::InterruptAck, status);
+    }
+
     pub fn meta(&self) -> Option<(u32, u32, u32, u32)> {
         match self.magic_value_safe() {
             Some(magic) if magic == VIRTIO_MAGIC => {
