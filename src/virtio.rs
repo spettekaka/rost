@@ -4,6 +4,7 @@ use log::info;
 
 use crate::virtio::virtio_mmio::LegacyMmioTransport;
 
+pub mod common;
 pub mod rng;
 pub mod virtio_mmio;
 
@@ -103,6 +104,35 @@ impl core::ops::BitOrAssign for DeviceStatus {
 
 impl From<DeviceStatus> for u32 {
     fn from(value: DeviceStatus) -> Self {
+        value.0
+    }
+}
+
+#[repr(transparent)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DescFlags(u16);
+
+impl DescFlags {
+    pub const READ_ONLY: Self = Self(0);
+    pub const NEXT: Self = Self(1 << 0);
+    pub const WRITE: Self = Self(1 << 1);
+    pub const INDIRECT: Self = Self(1 << 2);
+
+    pub const fn empty() -> Self {
+        Self(0)
+    }
+}
+
+impl core::ops::BitOr for DescFlags {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl From<DescFlags> for u16 {
+    fn from(value: DescFlags) -> Self {
         value.0
     }
 }

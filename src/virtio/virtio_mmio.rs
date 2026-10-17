@@ -108,7 +108,7 @@ impl LegacyMmioTransport {
         self.select_queue(index);
 
         self.write_reg(LegacyMmioRegister::QueueNum, num);
-        self.set_guest_page_size(PAGE_SIZE);
+        self.write_reg(LegacyMmioRegister::QueueAlign, PAGE_SIZE);
 
         let physical_pages = (ring_paddr / PAGE_SIZE as usize) as u32;
         self.write_reg(LegacyMmioRegister::QueuePfn, physical_pages);
