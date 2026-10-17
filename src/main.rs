@@ -100,7 +100,12 @@ unsafe fn kmain() -> ! {
                 .filter_by_type(virtio::VirtIODeviceType::EntropySource)
                 .next()
             {
-                let _rng_device = rng::VirtIORng::init(*rng_device).unwrap();
+                let mut rng_device = rng::VirtIORng::init(*rng_device).unwrap();
+                let mut entropy = [0u8; 32];
+
+                rng_device.request_entropy(&mut entropy);
+
+                info!("{:?}", entropy);
             }
         };
         // Release the other HARTs

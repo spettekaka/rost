@@ -1,11 +1,12 @@
+use core::ptr::{read_volatile, write_volatile};
+use core::sync::atomic::{Ordering, fence};
+
+use crate::virtio::common::{LegacyVirtqueue, QUEUE_SIZE};
 use crate::virtio::virtio_mmio::PAGE_SIZE;
-use crate::virtio::{DeviceStatus, VirtIODevice};
+use crate::virtio::{DescFlags, DeviceStatus, VirtIODevice};
 
-#[repr(C, align(4096))]
-struct AlignedRingMemory([u8; 8192]); // 2 contiguous 4KB pages
-
-// TODO: Use page allocator to get memory
-static mut RNG_QUEUE_MEM: AlignedRingMemory = AlignedRingMemory([0; 8192]);
+// TODO: Use page allocator to get memory, will require changes to legacy virtqueue
+static mut RNG_QUEUE: LegacyVirtqueue = unsafe { core::mem::zeroed() };
 
 pub struct VirtIORng {
     dev: VirtIODevice,
@@ -22,20 +23,54 @@ impl VirtIORng {
         mmio.set_status(DeviceStatus::ACK);
         mmio.add_status(DeviceStatus::DRIVER);
 
-        // Negotiate features
-        mmio.add_status(DeviceStatus::FEATURES_OK);
-
-        mmio.set_guest_page_size(PAGE_SIZE);
-
         // Setup queues
+        mmio.set_guest_page_size(PAGE_SIZE);
         let max = mmio.max_queue_size(0);
-        let queue_size = 16.min(max);
+        let queue_size = (QUEUE_SIZE as u32).min(max);
 
-        let ring_paddr = core::ptr::addr_of_mut!(RNG_QUEUE_MEM) as usize;
+        let ring_paddr = core::ptr::addr_of_mut!(RNG_QUEUE) as usize;
         mmio.setup_queue(0, queue_size, ring_paddr as usize);
 
         // Finalize
         mmio.add_status(DeviceStatus::DRIVER_OK);
+
         Ok(Self { dev })
+    }
+
+    /// Only descriptor '0' is used
+    pub fn request_entropy(&mut self, buf: &mut [u8]) {
+        let mut mmio = self.dev.registers();
+
+        unsafe {
+            // Populate descriptor 0
+            write_volatile(&mut RNG_QUEUE.desc[0].addr, buf.as_mut_ptr() as u64);
+            write_volatile(&mut RNG_QUEUE.desc[0].len, buf.len() as u32);
+            write_volatile(&mut RNG_QUEUE.desc[0].flags, DescFlags::WRITE.into());
+            write_volatile(&mut RNG_QUEUE.desc[0].next, 0);
+
+            // Make descriptor available
+            let index = read_volatile(&raw const RNG_QUEUE.avail.index);
+            let slot = index as usize % QUEUE_SIZE;
+            write_volatile(&mut RNG_QUEUE.avail.ring[slot], 0); // Descriptor 0
+
+            // Memory fence so the device sees descriptor updates before idx increments
+            fence(Ordering::SeqCst);
+
+            // Increment Available index
+            write_volatile(&raw mut RNG_QUEUE.avail.index, index.wrapping_add(1));
+
+            fence(Ordering::SeqCst);
+
+            //  Notify Queue 0
+            let last_used = read_volatile(&raw const RNG_QUEUE.used.index);
+            mmio.notify_queue(0);
+
+            //  Spin-wait until used index is incremented, indicates that entropy had been fetched
+            while read_volatile(&raw mut RNG_QUEUE.used.index) == last_used {
+                for _ in 0..100_000 {
+                    core::hint::spin_loop();
+                }
+            }
+        }
     }
 }
