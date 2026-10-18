@@ -87,7 +87,7 @@ impl KernelCsprng for ChaCha20Csprng {
         while !dest.is_empty() {
             let mut block = chacha20_block(&eph_key, counter, nonce);
             let take = dest.len().min(64);
-            write_words_partial(&block, dest);
+            write_words_partial(&block, &mut dest[..take]);
 
             block.fill(0);
             core::hint::black_box(&block);

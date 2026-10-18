@@ -120,18 +120,14 @@ pub fn get_random_bytes(dest: &mut [u8]) {
     }
 }
 
-fn get_virtio_entropy(entropy: &mut [u8]) -> bool {
+fn get_virtio_entropy(entropy: &mut [u8]) {
     let (_, mmio) = virtio::take_transport(virtio::VirtIODeviceType::EntropySource)
         .expect("Failed to get rng_device");
     let mut rng_device = VirtIORng::new(mmio);
-    log::info!("here1");
 
     rng_device.request_entropy(entropy);
-    log::info!("here2");
 
     while !ENTROPY_READY.load(Ordering::Acquire) {
         crate::arch::riscv::wait();
     }
-    log::info!("here3");
-    true
 }

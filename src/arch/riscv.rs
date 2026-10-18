@@ -57,6 +57,12 @@ pub unsafe fn clear_sie_ssoft() {
     }
 }
 
+pub fn expose_cycles() {
+    unsafe {
+        riscv::register::mcounteren::set_cy();
+    }
+}
+
 pub fn cycles() -> u64 {
     let cycles: u64;
     unsafe {

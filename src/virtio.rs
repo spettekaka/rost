@@ -2,7 +2,10 @@ extern crate alloc;
 use alloc::vec::Vec;
 use log::info;
 
-use crate::virtio::virtio_mmio::LegacyMmioTransport;
+use crate::{
+    sync::spinlock::{Mutex, MutexError},
+    virtio::virtio_mmio::LegacyMmioTransport,
+};
 
 pub mod common;
 pub mod rng;
@@ -10,9 +13,11 @@ pub mod virtio_mmio;
 
 pub const VIRTIO_MMIO_BASE: usize = 0x1000_1000;
 pub const VIRTIO_MMIO_STRIDE: usize = 0x1000;
-pub const VIRTIO_SLOTS: usize = 32;
+pub const VIRTIO_SLOTS: usize = 8; // FIXME: 8 is max when running in QEMU
 
 const VIRTIO_MAGIC: u32 = 0x74726976; // "virt"
+
+pub static VIRTIO_BUS: Mutex<VirtIOBus> = Mutex::new(VirtIOBus::new());
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq)]
 #[repr(u32)]
@@ -177,6 +182,10 @@ impl VirtIODevice {
         self.slot
     }
 
+    pub fn irq(&self) -> u32 {
+        (self.slot + 1) as u32
+    }
+
     /// The virtio device type
     pub fn device_type(&self) -> VirtIODeviceType {
         self.device_type
@@ -191,30 +200,34 @@ impl VirtIODevice {
         LegacyMmioTransport::new(self.addr)
     }
 }
+
 pub struct VirtIOBus {
     devices: Vec<VirtIODevice>,
 }
 
 impl VirtIOBus {
-    pub unsafe fn probe() -> Self {
-        let mut devices = Vec::new();
-        for i in 0..VIRTIO_SLOTS {
+    pub const fn new() -> Self {
+        Self {
+            devices: Vec::new(),
+        }
+    }
+
+    pub unsafe fn probe(&mut self) {
+        for i in 0..8 {
             let base_addr = VIRTIO_MMIO_BASE + (i * VIRTIO_MMIO_STRIDE);
 
             let mmio = LegacyMmioTransport::new(base_addr);
 
-            if let Some((_magic, _version, device_id, vendor_id)) = mmio.meta() {
-                if mmio.is_valid() {
-                    devices.push(VirtIODevice {
-                        slot: i,
-                        addr: base_addr,
-                        device_type: VirtIODeviceType::from(device_id),
-                        vendor_id,
-                    });
-                }
+            let (_magic, _version, device_id, vendor_id) = mmio.meta();
+            if mmio.is_valid() {
+                self.devices.push(VirtIODevice {
+                    slot: i,
+                    addr: base_addr,
+                    device_type: VirtIODeviceType::from(device_id),
+                    vendor_id,
+                });
             }
         }
-        Self { devices }
     }
 
     pub fn iter(&self) -> core::slice::Iter<'_, VirtIODevice> {
@@ -230,13 +243,47 @@ impl VirtIOBus {
             .filter(move |dev| dev.device_type() == device_type)
     }
 
-    pub fn dump(&self) {
+    pub fn _dump(&self) {
         info!("----- VirtIO devices -----");
         for device in self.iter() {
             info!("\t Slot {:X}: {:?}", device.slot(), device.device_type());
         }
         info!("----- \t -----");
     }
+
+    pub fn dump(bus: &VirtIOBus) {
+        bus._dump();
+    }
+
+    /// Read-only slice of all discovered devices
+    pub fn devices(&self) -> &[VirtIODevice] {
+        &self.devices
+    }
+
+    /// Claims the `LegacyMmioTransport` and returns `(irq, transport)` for a driver to initialize
+    pub fn take_transport(
+        &mut self,
+        device_type: VirtIODeviceType,
+    ) -> Option<(u32, LegacyMmioTransport)> {
+        for dev in self.devices.iter() {
+            if dev.device_type() == device_type {
+                let transport = dev.registers();
+                return Some((dev.irq(), transport));
+            }
+        }
+        None
+    }
+}
+
+pub fn init() -> Result<(), MutexError> {
+    let mut bus = VIRTIO_BUS.lock()?;
+    unsafe { bus.probe() };
+    VirtIOBus::dump(&bus);
+    Ok(())
+}
+
+pub fn take_transport(id: VirtIODeviceType) -> Option<(u32, LegacyMmioTransport)> {
+    VIRTIO_BUS.lock().ok()?.take_transport(id)
 }
 
 impl IntoIterator for VirtIOBus {

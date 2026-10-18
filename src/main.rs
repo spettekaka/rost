@@ -11,6 +11,7 @@ use rost::clint;
 use rost::klog;
 use rost::mem;
 use rost::plic;
+use rost::random::{self, get_random_bytes};
 use rost::symbols::{HEAP_SIZE, HEAP_START};
 use rost::trap;
 use rost::uart;
@@ -65,6 +66,9 @@ unsafe fn kinit() -> ! {
         let value = mideleg::Mideleg::from_bits(mideleg::Mideleg::BITMASK);
         mideleg::write(value);
 
+        // Provide access to rdcycles i s-mode
+        arch::riscv::expose_cycles();
+
         // Give access to physical memory
         pmpaddr0::write(usize::MAX);
         pmpcfg0::set_pmp(0, Range::NAPOT, Permission::RWX, false);
@@ -89,7 +93,22 @@ unsafe fn kmain() -> ! {
     info!("Initiating hart: {}", arch::riscv::thread_pointer());
     if arch::riscv::thread_pointer() == 0 {
         // Setup allocator
-        unsafe { rost::alloc::LockedHeap::init(HEAP_START(), HEAP_SIZE()) };
+        unsafe {
+            rost::alloc::LockedHeap::init(HEAP_START(), HEAP_SIZE());
+            trap::enable_interrupts();
+        };
+
+        // Probe virtio
+        virtio::init();
+        // Init devices
+        let (_, mmio) = virtio::take_transport(virtio::VirtIODeviceType::EntropySource)
+            .expect("Failed to get rng_device");
+        let mut rng_device = rng::VirtIORng::new(mmio);
+        rng_device.init();
+
+        // If randomness fails to init, panic
+        random::init().unwrap();
+
         // Release the other HARTs
         BOOT.store(true, Ordering::Relaxed);
     } else {
@@ -99,32 +118,12 @@ unsafe fn kmain() -> ! {
         hartinit();
     }
 
-    unsafe {
-        trap::enable_interrupts();
-    }
+    let mut entropy = [0u8; 1024];
+    get_random_bytes(&mut entropy);
+    info!("Entropy: {:?}", entropy);
 
     info!("Hart #{} ready", arch::riscv::thread_pointer());
-    // Probe virtio
-    virtio::init();
 
-    if let Some(rng_device) = VIRTIO_BUS
-        .lock()
-        .unwrap()
-        .filter_by_type(virtio::VirtIODeviceType::EntropySource)
-        .next()
-    {
-        let mut rng_device = rng::VirtIORng::new(rng_device.registers());
-        rng_device.init();
-        let mut entropy = [0u8; 32];
-
-        rng_device.request_entropy(&mut entropy);
-
-        while !ENTROPY_READY.load(Ordering::Acquire) {
-            rost::arch::riscv::wait();
-        }
-
-        info!("{:?}", entropy);
-    }
     loop {
         rost::arch::riscv::wait();
     }
@@ -140,5 +139,6 @@ fn hartinit() {
     plic::hartinit();
     unsafe {
         trap::hartinit();
+        trap::enable_interrupts();
     }
 }

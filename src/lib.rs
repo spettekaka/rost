@@ -4,6 +4,7 @@
 pub mod alloc;
 pub mod arch;
 pub mod clint;
+pub mod consts;
 pub mod interrupt;
 pub mod klog;
 pub mod mem;
@@ -11,6 +12,7 @@ pub mod mmio;
 pub mod page;
 pub mod plic;
 pub mod rand;
+pub mod random;
 pub mod slab;
 pub mod symbols;
 pub mod sync;
