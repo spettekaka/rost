@@ -13,12 +13,11 @@ use log::info;
 
 // PLIC mmio registers
 pub const PLIC_BASE: usize = 0x0c00_0000;
-const _PLIC_PRIORITY: usize = PLIC_BASE + 0x0;
+const PLIC_PRIORITY_BASE: usize = PLIC_BASE + 0x0;
+const PLIC_STHRESHOLD_BASE: usize = PLIC_BASE + 0x20_1000;
 const PLIC_PENDING: usize = PLIC_BASE + 0x1000;
 const _PLIC_MENABLE_BASE: usize = PLIC_BASE + 0x2000;
 const PLIC_SENABLE_BASE: usize = PLIC_BASE + 0x2080;
-const _PLIC_MPRIORITY_BASE: usize = PLIC_BASE + 0x200000;
-const PLIC_SPRIORITY_BASE: usize = PLIC_BASE + 0x201000;
 const _PLIC_MCLAIM_BASE: usize = PLIC_BASE + 0x200004;
 const PLIC_SCLAIM_BASE: usize = PLIC_BASE + 0x201004;
 
@@ -102,11 +101,18 @@ impl Plic {
 
     /// Enable an interrupt id.
     pub fn enable(&mut self, id: InterruptId) {
-        let enable = Self::senable(thread_pointer()) as *mut u32;
-        // The plic enable register contains a bitmap over enabled interrupts.
-        let id = 1 << id as u32;
+        let id = id as usize;
+        let reg_base = Self::senable(thread_pointer()) as *mut u32;
+
+        // 32 interrupts per u32 register:
+        // - `id / 32` selects which u32 word
+        // - `id % 32` selects which bit inside that word
+        let word_index = id / 32;
+        let bit_mask = 1u32 << (id % 32);
+
         unsafe {
-            enable.write_volatile(enable.read_volatile() | id);
+            let reg = reg_base.add(word_index);
+            reg.write_volatile(reg.read_volatile() | bit_mask);
         }
     }
 
@@ -125,7 +131,7 @@ impl Plic {
     /// Priority must be in range [0..7]
     pub fn set_priority(&mut self, id: InterruptId, priority: Priority) {
         let priority = priority as u32;
-        let reg = Plic::spriority(thread_pointer()) as *mut u32;
+        let reg = PLIC_PRIORITY_BASE as *mut u32;
         unsafe {
             // Interrupt id offset is: PLIC_PRIORITY + 4 * id
             // Reg is u32, no neeed to multiply by 4
@@ -141,7 +147,7 @@ impl Plic {
     /// Threshold must be in [0..7]
     pub fn set_threshold(&mut self, threshold: Threshold) {
         let threshold = Priority::from(threshold) as u32;
-        let reg = Plic::spriority(thread_pointer()) as *mut u32;
+        let reg = Self::sthreshold(thread_pointer()) as *mut u32;
         unsafe {
             reg.write_volatile(threshold);
         }
@@ -178,20 +184,16 @@ impl Plic {
         }
     }
 
+    const fn sthreshold(hart: usize) -> usize {
+        PLIC_STHRESHOLD_BASE + hart * 0x2000
+    }
+
     const fn _menable(hart: usize) -> usize {
         _PLIC_MENABLE_BASE + hart * 0x100
     }
 
     const fn senable(hart: usize) -> usize {
         PLIC_SENABLE_BASE + hart * 0x100
-    }
-
-    const fn _mpriority(hart: usize) -> usize {
-        _PLIC_MPRIORITY_BASE + hart * 0x2000
-    }
-
-    const fn spriority(hart: usize) -> usize {
-        PLIC_SPRIORITY_BASE + hart * 0x2000
     }
 
     const fn _mclaim(hart: usize) -> usize {
