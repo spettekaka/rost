@@ -56,11 +56,6 @@ impl LegacyMmioTransport {
         self.read_reg(LegacyMmioRegister::MagicValue)
     }
 
-    pub fn magic_value_safe(&self) -> Option<u32> {
-        let addr = self.addr + LegacyMmioRegister::MagicValue as usize;
-        unsafe { mmio::safe_mmio_read_u32(addr as *const u32) }
-    }
-
     pub fn version(&self) -> u32 {
         self.read_reg(LegacyMmioRegister::Version)
     }
@@ -126,25 +121,18 @@ impl LegacyMmioTransport {
         self.write_reg(LegacyMmioRegister::InterruptAck, status);
     }
 
-    pub fn meta(&self) -> Option<(u32, u32, u32, u32)> {
-        match self.magic_value_safe() {
-            Some(magic) if magic == VIRTIO_MAGIC => {
-                let version = self.version();
-                let device_id = self.read_reg(LegacyMmioRegister::DeviceId);
-                let vendor_id = self.read_reg(LegacyMmioRegister::VendorId);
-                Some((magic, version, device_id, vendor_id))
-            }
-            _ => None,
-        }
+    pub fn meta(&self) -> (u32, u32, u32, u32) {
+        let magic = self.magic_value();
+        let version = self.version();
+        let device_id = self.device_id();
+        let vendor_id = self.vendor_id();
+        (magic, version, device_id, vendor_id)
     }
 
     pub fn is_valid(&self) -> bool {
-        if let Some((magic, version, device_id, _)) = self.meta() {
-            magic == VIRTIO_MAGIC
-                && version == 1
-                && VirtIODeviceType::from(device_id) != VirtIODeviceType::Unknown(device_id)
-        } else {
-            false
-        }
+        let (magic, version, device_id, _) = self.meta();
+        magic == VIRTIO_MAGIC
+            && version == 1
+            && VirtIODeviceType::from(device_id) != VirtIODeviceType::Unknown(device_id)
     }
 }

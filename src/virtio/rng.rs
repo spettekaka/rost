@@ -2,8 +2,8 @@ use core::ptr::{read_volatile, write_volatile};
 use core::sync::atomic::{AtomicBool, Ordering, fence};
 
 use crate::virtio::common::{LegacyVirtqueue, QUEUE_SIZE};
-use crate::virtio::virtio_mmio::PAGE_SIZE;
-use crate::virtio::{DescFlags, DeviceStatus, VirtIODevice};
+use crate::virtio::virtio_mmio::{LegacyMmioTransport, PAGE_SIZE};
+use crate::virtio::{DescFlags, DeviceStatus};
 
 // TODO: Use page allocator to get memory, will require changes to legacy virtqueue
 pub static mut RNG_QUEUE: LegacyVirtqueue = unsafe { core::mem::zeroed() };
@@ -12,37 +12,37 @@ pub static mut RNG_QUEUE: LegacyVirtqueue = unsafe { core::mem::zeroed() };
 pub static ENTROPY_READY: AtomicBool = AtomicBool::new(false);
 
 pub struct VirtIORng {
-    dev: VirtIODevice,
+    mmio: LegacyMmioTransport,
 }
 
 impl VirtIORng {
-    pub fn init(dev: VirtIODevice) -> Result<Self, &'static str> {
-        let mut mmio = dev.registers();
+    pub fn new(mmio: LegacyMmioTransport) -> Self {
+        Self { mmio }
+    }
 
+    pub fn init(&mut self) {
         // Reset
-        mmio.reset();
+        self.mmio.reset();
 
         // Ack and init driver
-        mmio.set_status(DeviceStatus::ACK);
-        mmio.add_status(DeviceStatus::DRIVER);
+        self.mmio.set_status(DeviceStatus::ACK);
+        self.mmio.add_status(DeviceStatus::DRIVER);
 
         // Setup queues
-        mmio.set_guest_page_size(PAGE_SIZE);
-        let max = mmio.max_queue_size(0);
+        self.mmio.set_guest_page_size(PAGE_SIZE);
+        let max = self.mmio.max_queue_size(0);
         let queue_size = (QUEUE_SIZE as u32).min(max);
 
         let ring_paddr = core::ptr::addr_of_mut!(RNG_QUEUE) as usize;
-        mmio.setup_queue(0, queue_size, ring_paddr as usize);
+        self.mmio.setup_queue(0, queue_size, ring_paddr as usize);
 
         // Finalize
-        mmio.add_status(DeviceStatus::DRIVER_OK);
-
-        Ok(Self { dev })
+        self.mmio.add_status(DeviceStatus::DRIVER_OK);
     }
 
     /// Only descriptor '0' is used
     pub fn request_entropy(&mut self, buf: &mut [u8]) {
-        let mut mmio = self.dev.registers();
+        ENTROPY_READY.store(false, Ordering::Release);
 
         unsafe {
             // Ensure interrupts are NOT suppressed on the available ring
@@ -59,7 +59,7 @@ impl VirtIORng {
             let slot = index as usize % QUEUE_SIZE;
             write_volatile(&mut RNG_QUEUE.avail.ring[slot], 0); // Descriptor 0
 
-            // Memory fence so the device sees descriptor updates before idx increments
+            // Memory fence so the device sees descriptor updates before index increments
             fence(Ordering::SeqCst);
 
             // Increment Available index
@@ -68,7 +68,7 @@ impl VirtIORng {
             fence(Ordering::SeqCst);
 
             //  Notify Queue 0
-            mmio.notify_queue(0);
+            self.mmio.notify_queue(0);
         }
     }
 }

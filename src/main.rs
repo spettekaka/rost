@@ -14,8 +14,8 @@ use rost::plic;
 use rost::symbols::{HEAP_SIZE, HEAP_START};
 use rost::trap;
 use rost::uart;
-use rost::virtio;
 use rost::virtio::rng::{self, ENTROPY_READY};
+use rost::virtio::{self, VIRTIO_BUS};
 
 use log::{LevelFilter, info};
 
@@ -104,27 +104,27 @@ unsafe fn kmain() -> ! {
     }
 
     info!("Hart #{} ready", arch::riscv::thread_pointer());
-    unsafe {
-        // Probe virtio
-        let virtio_bus = virtio::VirtIOBus::probe();
-        virtio_bus.dump();
+    // Probe virtio
+    virtio::init();
 
-        if let Some(rng_device) = virtio_bus
-            .filter_by_type(virtio::VirtIODeviceType::EntropySource)
-            .next()
-        {
-            let mut rng_device = rng::VirtIORng::init(*rng_device).unwrap();
-            let mut entropy = [0u8; 32];
+    if let Some(rng_device) = VIRTIO_BUS
+        .lock()
+        .unwrap()
+        .filter_by_type(virtio::VirtIODeviceType::EntropySource)
+        .next()
+    {
+        let mut rng_device = rng::VirtIORng::new(rng_device.registers());
+        rng_device.init();
+        let mut entropy = [0u8; 32];
 
-            rng_device.request_entropy(&mut entropy);
+        rng_device.request_entropy(&mut entropy);
 
-            while !ENTROPY_READY.load(Ordering::Acquire) {
-                rost::arch::riscv::wait();
-            }
-
-            info!("{:?}", entropy);
+        while !ENTROPY_READY.load(Ordering::Acquire) {
+            rost::arch::riscv::wait();
         }
-    };
+
+        info!("{:?}", entropy);
+    }
     loop {
         rost::arch::riscv::wait();
     }
