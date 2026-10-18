@@ -56,3 +56,11 @@ pub unsafe fn clear_sie_ssoft() {
         asm!("csrc sip, {}", in(reg) SSIP);
     }
 }
+
+pub fn cycles() -> u64 {
+    let cycles: u64;
+    unsafe {
+        asm!("rdcycle {}", out(reg) cycles);
+    }
+    cycles
+}
