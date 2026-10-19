@@ -92,7 +92,7 @@ impl<T: RandomValue, const N: usize> RandomValue for [T; N] {
 pub trait KernelCsprng {
     fn seed(&mut self, seed: &[u8; 32]);
 
-    fn reseed(&mut self);
+    fn reseed(&mut self, seed: &[u8; 32]);
 
     fn fill_bytes(&mut self, buf: &mut [u8]);
 }

@@ -71,8 +71,8 @@ impl KernelCsprng for ChaCha20Csprng {
         self.ready = true;
     }
 
-    fn reseed(&mut self) {
-        self.ready = false;
+    fn reseed(&mut self, seed: &[u8; 32]) {
+        self.seed(seed);
     }
 
     fn fill_bytes(&mut self, mut dest: &mut [u8]) {
