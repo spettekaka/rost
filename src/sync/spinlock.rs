@@ -27,6 +27,29 @@ impl<T> Mutex<T> {
         }
     }
 
+    pub fn with_lock<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&mut T) -> R,
+    {
+        // Spin until we acquire the lock
+        while self
+            .status
+            .compare_exchange(0, 1, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            core::hint::spin_loop();
+        }
+
+        // Ensures the lock is released even if `f` unwinds (if panic != abort)
+        let _guard = MutexGuard { mutex: self };
+
+        // SAFETY: We hold the exclusive lock, and the closure signature
+        // prevents the `&mut T` reference from escaping.
+        let result = f(unsafe { &mut *self.inner.get() });
+
+        result
+    }
+
     pub fn lock(&self) -> Result<MutexGuard<'_, T>, MutexError> {
         loop {
             match self
