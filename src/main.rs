@@ -107,7 +107,7 @@ unsafe fn kmain() -> ! {
         rng_device.init();
 
         // If randomness fails to init, panic
-        random::init().unwrap();
+        random::init();
 
         // Release the other HARTs
         BOOT.store(true, Ordering::Relaxed);
@@ -118,11 +118,13 @@ unsafe fn kmain() -> ! {
         hartinit();
     }
 
-    let mut entropy = [0u8; 1024];
-    get_random_bytes(&mut entropy);
-    info!("Entropy: {:?}", entropy);
-
     info!("Hart #{} ready", arch::riscv::thread_pointer());
+
+    let mut entropy = [0u8; 32];
+
+    get_random_bytes(&mut entropy);
+
+    info!("{:?}", entropy);
 
     loop {
         rost::arch::riscv::wait();

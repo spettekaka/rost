@@ -19,7 +19,7 @@ impl ChaCha20Csprng {
         }
     }
 
-    fn fast_key_erasure(&mut self) -> [u32; 8] {
+    pub fn fast_key_erasure(&mut self) -> [u32; 8] {
         let nonce = self.nonce();
         let mut block = chacha20_block(&self.key, 0, nonce);
 
@@ -71,8 +71,8 @@ impl KernelCsprng for ChaCha20Csprng {
         self.ready = true;
     }
 
-    fn reseed(&mut self, seed: &[u8; 32]) {
-        self.seed(seed);
+    fn reseed(&mut self) {
+        self.ready = false;
     }
 
     fn fill_bytes(&mut self, mut dest: &mut [u8]) {
