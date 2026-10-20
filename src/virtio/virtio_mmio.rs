@@ -1,6 +1,5 @@
 use core::ptr::{read_volatile, write_volatile};
 
-use crate::mmio;
 use crate::virtio::{DeviceStatus, VIRTIO_MAGIC, VirtIODeviceType};
 
 pub const PAGE_SIZE: u32 = 4096;
