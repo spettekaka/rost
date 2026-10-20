@@ -15,8 +15,8 @@ use rost::random::{self, get_random_bytes};
 use rost::symbols::{HEAP_SIZE, HEAP_START};
 use rost::trap;
 use rost::uart;
-use rost::virtio::rng::{self, ENTROPY_READY};
-use rost::virtio::{self, VIRTIO_BUS};
+use rost::virtio;
+use rost::virtio::rng;
 
 use log::{LevelFilter, info};
 
