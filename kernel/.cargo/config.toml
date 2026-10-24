@@ -1,0 +1,13 @@
+[target.riscv64imac-unknown-none-elf]
+rustflags = [
+  "-C", "link-arg=-Tmemory.x",
+  "-C", "link-arg=-Tlink.x",
+]
+
+runner = "qemu-system-riscv64 -machine virt -cpu rv64 -smp 4 -m 1024M -display none -serial stdio -bios none -device virtio-rng-device -device virtio-gpu-device -device virtio-net-device -device virtio-tablet-device -device virtio-keyboard-device -kernel"
+
+[build]
+target = "riscv64imac-unknown-none-elf"
+
+[unstable]
+build-std = ["alloc", "core", "compiler_builtins"]

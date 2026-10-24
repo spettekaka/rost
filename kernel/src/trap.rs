@@ -1,5 +1,6 @@
-use crate::arch;
 use crate::interrupt;
+
+use rost_core::arch;
 
 use core::arch::{asm, global_asm};
 

@@ -1,5 +1,6 @@
-use crate::arch;
 use crate::println;
+
+use rost_core::arch;
 
 use log::{LevelFilter, Metadata, Record, SetLoggerError};
 

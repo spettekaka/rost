@@ -2,14 +2,14 @@ use crate::mem::Region;
 use crate::symbols::{HEAP_SIZE, HEAP_START};
 use crate::{print, println};
 
+use rost_core::consts::{PAGE_ORDER, PAGE_SIZE};
+
 use core::cell::SyncUnsafeCell;
 use core::mem::size_of;
 use core::ptr::null_mut;
 
 use log::{info, warn};
 
-pub const PAGE_SIZE: usize = 1 << PAGE_ORDER;
-const PAGE_ORDER: usize = 12;
 const PAGE_TABLE_ENTRIES: usize = 512;
 
 static mut PAGES: usize = 0;

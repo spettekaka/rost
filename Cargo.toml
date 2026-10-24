@@ -1,15 +1,12 @@
-[package]
-name = "rost"
-version = "0.1.0"
-authors = ["Markus Åkesson <macke.95_06@hotmail.com>"]
-edition = "2024"
-build = "build.rs"
+[workspace]
+resolver = "2"
+members = [
+    "rost_core",
+    "kernel",
+]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-[dependencies]
-log = "0.4.11"
-riscv-rt = "0.18.0"
-riscv = "0.16.0"
+# Default to building/running only the kernel when you run `cargo build` at the root
+default-members = ["kernel"]
 
 [profile.release]
 lto = true

@@ -6,17 +6,18 @@ extern crate alloc;
 use core::arch::asm;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use rost::arch;
-use rost::clint;
-use rost::klog;
-use rost::mem;
-use rost::plic;
-use rost::random::{self, get_random_bytes};
-use rost::symbols::{HEAP_SIZE, HEAP_START};
-use rost::trap;
-use rost::uart;
-use rost::virtio;
-use rost::virtio::rng;
+use kernel::clint;
+use kernel::klog;
+use kernel::mem;
+use kernel::plic;
+use kernel::random::{self, get_random_bytes};
+use kernel::symbols::{HEAP_SIZE, HEAP_START};
+use kernel::trap;
+use kernel::uart;
+
+use rost_core::arch;
+use rost_core::virtio;
+use rost_core::virtio::rng;
 
 use log::{LevelFilter, info};
 
@@ -79,7 +80,7 @@ unsafe fn kinit() -> ! {
     }
 
     loop {
-        rost::arch::riscv::wait();
+        rost_core::arch::riscv::wait();
     }
 }
 
@@ -94,7 +95,7 @@ unsafe fn kmain() -> ! {
     if arch::riscv::thread_pointer() == 0 {
         // Setup allocator
         unsafe {
-            rost::alloc::LockedHeap::init(HEAP_START(), HEAP_SIZE());
+            rost_core::alloc::LockedHeap::init(HEAP_START(), HEAP_SIZE());
             trap::enable_interrupts();
         };
 
@@ -113,7 +114,7 @@ unsafe fn kmain() -> ! {
         BOOT.store(true, Ordering::Relaxed);
     } else {
         while !BOOT.load(Ordering::Acquire) {
-            rost::arch::riscv::wait();
+            rost_core::arch::riscv::wait();
         }
         hartinit();
     }
@@ -127,7 +128,7 @@ unsafe fn kmain() -> ! {
     info!("{:?}", entropy);
 
     loop {
-        rost::arch::riscv::wait();
+        rost_core::arch::riscv::wait();
     }
 }
 
