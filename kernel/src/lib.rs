@@ -1,6 +1,7 @@
 #![no_std]
 #![feature(sync_unsafe_cell)]
 
+pub mod alloc;
 pub mod clint;
 pub mod interrupt;
 pub mod klog;

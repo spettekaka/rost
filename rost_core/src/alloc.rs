@@ -1,11 +1,6 @@
-use core::alloc::{AllocError, GlobalAlloc, Layout};
-use core::ops::Deref;
-use core::ptr::null_mut;
-
-use log::info;
+use core::alloc::{AllocError, Layout};
 
 use crate::slab::Slab;
-use crate::sync::spinlock::Mutex;
 
 pub const NUM_SLABS: usize = 7;
 pub const MIN_SLAB_SIZE: usize = 4096;
@@ -80,50 +75,3 @@ impl Heap {
         }
     }
 }
-
-pub struct LockedHeap(Mutex<Option<Heap>>);
-
-impl LockedHeap {
-    pub const fn new() -> Self {
-        Self(Mutex::new(None))
-    }
-
-    pub unsafe fn init(start_addr: usize, size: usize) {
-        info!(
-            "Initiating allocator. Start addr: 0x{:x}, size: {}",
-            start_addr, size
-        );
-        unsafe {
-            *ALLOCATOR.0.lock().unwrap() = Some(Heap::new(start_addr, size));
-        }
-    }
-}
-
-impl Deref for LockedHeap {
-    type Target = Mutex<Option<Heap>>;
-
-    fn deref(&self) -> &Mutex<Option<Heap>> {
-        &self.0
-    }
-}
-
-unsafe impl GlobalAlloc for LockedHeap {
-    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        if let Some(ref mut heap) = *self.0.lock().unwrap() {
-            match heap.allocate(layout) {
-                Ok(ptr) => return ptr,
-                Err(_) => return null_mut(),
-            }
-        }
-        null_mut()
-    }
-
-    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        if let Some(ref mut heap) = *self.0.lock().unwrap() {
-            heap.deallocate(ptr, layout);
-        }
-    }
-}
-
-#[global_allocator]
-pub static ALLOCATOR: LockedHeap = LockedHeap::new();
