@@ -1,0 +1,11 @@
+[package]
+name = "kernel"
+version = "0.1.0"
+authors = ["Markus Åkesson <markus@akesson.dev"]
+edition = "2024"
+
+[dependencies]
+log = "0.4.34"
+riscv = "0.16.1"
+riscv-rt = "0.18.0"
+rost_core = { path = "../rost_core" }

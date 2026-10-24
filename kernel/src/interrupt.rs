@@ -4,8 +4,9 @@ use core::sync::atomic::Ordering;
 use crate::arch::riscv;
 use crate::plic::{self, InterruptId};
 use crate::uart::uart_interrupt;
-use crate::virtio::rng::{ENTROPY_READY, RNG_QUEUE};
-use crate::virtio::virtio_mmio::LegacyMmioTransport;
+
+use rost_core::virtio::rng::{ENTROPY_READY, RNG_QUEUE};
+use rost_core::virtio::virtio_mmio::LegacyMmioTransport;
 
 use log::{debug, error};
 

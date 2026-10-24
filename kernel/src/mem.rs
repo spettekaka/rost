@@ -1,10 +1,11 @@
-use crate::arch;
 use crate::clint::{CLINT_BASE, CLINT_SIZE};
 use crate::page::{self, Attribute, KERNEL_PAGE_TABLE};
 use crate::plic::PLIC_BASE;
 use crate::symbols::*;
 use crate::uart;
-use crate::virtio::{VIRTIO_MMIO_BASE, VIRTIO_MMIO_STRIDE, VIRTIO_SLOTS};
+
+use rost_core::arch;
+use rost_core::virtio::{VIRTIO_MMIO_BASE, VIRTIO_MMIO_STRIDE, VIRTIO_SLOTS};
 
 use log::info;
 

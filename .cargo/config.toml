@@ -1,13 +1,18 @@
+[alias]
+# 1. Host unit tests (instant, runs on your native OS)
+utest = "test -p rost_core"
+
+# Run your RISC-V kernel in QEMU
+krun = "run --release -p kernel --target riscv64imac-unknown-none-elf -Z build-std=alloc,core,compiler_builtins"
+# Build your RISC-V kernel
+kbuild = "build --release -p kernel --target riscv64imac-unknown-none-elf -Z build-std=alloc,core,compiler_builtins"
+# Run your RISC-V QEMU system/integration tests
+ktest = "test --relase -p kernel --target riscv64imac-unknown-none-elf -Z build-std=alloc,core,compiler_builtins"
+
 [target.riscv64imac-unknown-none-elf]
 rustflags = [
   "-C", "link-arg=-Tmemory.x",
   "-C", "link-arg=-Tlink.x",
 ]
+
 runner = "qemu-system-riscv64 -machine virt -cpu rv64 -smp 4 -m 1024M -display none -serial stdio -bios none -device virtio-rng-device -device virtio-gpu-device -device virtio-net-device -device virtio-tablet-device -device virtio-keyboard-device -kernel"
-
-[build]
-target = "riscv64imac-unknown-none-elf"
-
-[unstable]
-build-std = ["alloc", "core", "compiler_builtins"]
-

@@ -1,24 +1,19 @@
 #![no_std]
 #![feature(sync_unsafe_cell)]
 
-pub mod alloc;
-pub mod arch;
 pub mod clint;
-pub mod consts;
 pub mod interrupt;
 pub mod klog;
 pub mod mem;
 pub mod mmio;
 pub mod page;
 pub mod plic;
-pub mod rand;
 pub mod random;
-pub mod slab;
 pub mod symbols;
-pub mod sync;
 pub mod trap;
 pub mod uart;
-pub mod virtio;
+
+use rost_core::arch;
 
 /// Panic handler
 #[panic_handler]

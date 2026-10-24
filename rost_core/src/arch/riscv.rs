@@ -1,4 +1,4 @@
-use crate::page::PAGE_SIZE;
+use crate::consts::PAGE_SIZE;
 
 use core::arch::asm;
 use core::time::Duration;

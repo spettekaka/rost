@@ -1,0 +1,11 @@
+[package]
+name = "rost_core"
+version = "0.1.0"
+authors = ["Markus Åkesson <markus@akesson.dev"]
+edition = "2024"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[dependencies]
+log = "0.4.11"
+riscv = "0.16.1"
+riscv-rt = "0.18.0"
