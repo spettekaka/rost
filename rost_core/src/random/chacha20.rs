@@ -20,7 +20,7 @@ impl ChaCha20Csprng {
     }
 
     pub fn fast_key_erasure(&mut self) -> [u32; 8] {
-        let nonce = self.nonce();
+        let nonce = [0u32; 2];
         let mut block = chacha20_block(&self.key, 0, nonce);
 
         // Copy the first 32 bytes to the key,
@@ -34,11 +34,6 @@ impl ChaCha20Csprng {
         block.fill(0);
         core::hint::black_box(&block);
         out
-    }
-
-    fn nonce(&self) -> [u32; 2] {
-        let cycles = crate::arch::riscv::cycles();
-        [cycles as u32, ((cycles >> 32) as u32) ^ self.reseed_counter]
     }
 
     fn refill(&mut self) {
@@ -81,7 +76,7 @@ impl KernelCsprng for ChaCha20Csprng {
         }
 
         let mut eph_key = self.fast_key_erasure();
-        let nonce = self.nonce();
+        let nonce = [0u32; 2];
 
         let mut counter = 1u64;
         while !dest.is_empty() {
