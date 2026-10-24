@@ -95,7 +95,7 @@ unsafe fn kmain() -> ! {
     if arch::riscv::thread_pointer() == 0 {
         // Setup allocator
         unsafe {
-            rost_core::alloc::LockedHeap::init(HEAP_START(), HEAP_SIZE());
+            kernel::alloc::LockedHeap::init(HEAP_START(), HEAP_SIZE());
             trap::enable_interrupts();
         };
 
