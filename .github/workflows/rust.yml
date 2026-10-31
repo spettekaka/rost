@@ -2,19 +2,45 @@ name: Rust
 
 on:
   push:
-    branches: [ master, dev ]
   pull_request:
-    branches: [ master, dev ]
 
 env:
   CARGO_TERM_COLOR: always
+  RISCV_TARGET: riscv64imac-unknown-none-elf
 
 jobs:
+  lint: 
+    name: Format
+    runs-on: ubuntu-latest
+    steps: 
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt, clippy, rust-src
+          targets: ${{ env.RISCV_TARGET }}
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy (Host)
+        run: cargo hclippy
+
+      - name: Clippy (Bare-metal RISC-V)
+        run: cargo tclippy
+
+
   build:
 
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2
-    - name: Build
-      run: cargo build --verbose
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt, clippy, rust-src
+          targets: ${{ env.RISCV_TARGET }}
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo kbuild
