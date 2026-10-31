@@ -67,7 +67,7 @@ impl Rng for ChaCha20Csprng {
 
 impl KernelCsprng for ChaCha20Csprng {
     fn seed(&mut self, seed: &[u8; 32]) {
-        for (i, chunk) in seed.chunks_exact(4).enumerate() {
+        for (i, chunk) in seed.as_chunks::<4>().0.iter().enumerate() {
             self.key[i] ^= u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
         }
         self.fast_key_erasure();

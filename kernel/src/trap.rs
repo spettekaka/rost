@@ -124,6 +124,10 @@ unsafe extern "C" fn machine_trap() {
 /// Enable Interrupts
 ///
 /// We handle all interrupts in supervisor mode
+///
+/// # Safety
+///
+/// The code is only valid for riscv targets
 pub unsafe fn enable_interrupts() {
     info!("Enabling interrupts");
     // enable interrupts
@@ -140,6 +144,10 @@ pub unsafe fn enable_interrupts() {
 /// Hart init
 ///
 /// Set the vector for handling supervisor mode
+///
+/// # Safety
+///
+/// The code is only valid for riscv targets
 pub unsafe fn hartinit() {
     let mut stvec_data = Stvec::from_bits(0);
     stvec_data.set_address(_start_trap as *const () as usize);

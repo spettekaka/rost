@@ -9,16 +9,26 @@ use log::info;
 
 pub struct LockedHeap(Mutex<Option<Heap>>);
 
+impl Default for LockedHeap {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LockedHeap {
     pub const fn new() -> Self {
         Self(Mutex::new(None))
     }
 
+    /// # Safety
+    ///
+    /// The kernel gurantees the addresses are correct
     pub unsafe fn init(start_addr: usize, size: usize) {
         info!(
             "Initiating allocator. Start addr: 0x{:x}, size: {}",
             start_addr, size
         );
+
         unsafe {
             *ALLOCATOR.0.lock().unwrap() = Some(Heap::new(start_addr, size));
         }

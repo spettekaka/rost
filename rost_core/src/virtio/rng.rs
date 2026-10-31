@@ -34,7 +34,7 @@ impl VirtIORng {
         let queue_size = (QUEUE_SIZE as u32).min(max);
 
         let ring_paddr = core::ptr::addr_of_mut!(RNG_QUEUE) as usize;
-        self.mmio.setup_queue(0, queue_size, ring_paddr as usize);
+        self.mmio.setup_queue(0, queue_size, ring_paddr);
 
         // Finalize
         self.mmio.add_status(DeviceStatus::DRIVER_OK);

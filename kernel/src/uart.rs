@@ -7,7 +7,7 @@ pub const UART_BASE_ADDR: usize = 0x10_000_000;
 macro_rules! print {
     ($($args:tt)+) => ({
 	use core::fmt::Write;
-	let _ = write!(crate::uart::Uart::new(crate::uart::UART_BASE_ADDR), $($args)+);
+	let _ = write!($crate::uart::Uart::new($crate::uart::UART_BASE_ADDR), $($args)+);
     });
 }
 #[macro_export]
@@ -123,7 +123,6 @@ impl Uart {
 pub fn uart_interrupt() {
     let mut uart = Uart::new(UART_BASE_ADDR);
     if let Some(c) = uart.get() {
-        drop(uart);
         match c {
             8 => print!("{} {}", 8 as char, 8 as char),
             10 | 13 => println!(),
