@@ -44,3 +44,19 @@ jobs:
 
       - name: Build
         run: cargo kbuild
+
+  host-tests:
+    name: Host Unit Tests & Miri
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: miri, rust-src
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run Host Unit Tests
+        run: cargo utest
+
+      - name: Run Miri on Host Tests
+        run: cargo umiri
