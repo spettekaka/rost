@@ -43,6 +43,15 @@ impl ChaCha20Csprng {
     }
 }
 
+impl Drop for ChaCha20Csprng {
+    fn drop(&mut self) {
+        self.key.fill(0);
+        self.buffer.fill(0);
+        core::hint::black_box(&self.key);
+        core::hint::black_box(&self.buffer);
+    }
+}
+
 impl Rng for ChaCha20Csprng {
     fn next_u8(&mut self) -> u8 {
         if self.pos == self.buffer.len() {
@@ -161,6 +170,7 @@ fn chacha20_block(key: &[u32; 8], cntr: u64, nonce: [u32; 2]) -> [u32; 16] {
         quarter_round(&mut state, 1, 5, 9, 13);
         quarter_round(&mut state, 2, 6, 10, 14);
         quarter_round(&mut state, 3, 7, 11, 15);
+
         quarter_round(&mut state, 0, 5, 10, 15);
         quarter_round(&mut state, 1, 6, 11, 12);
         quarter_round(&mut state, 2, 7, 8, 13);
@@ -184,8 +194,11 @@ mod tests {
             0x03020100, 0x07060504, 0x0b0a0908, 0x0f0e0d0c, 0x13121110, 0x17161514, 0x1b1a1918,
             0x1f1e1d1c,
         ];
-        // Low 32 bits (state[12]) = 0x00000001, High 32 bits (state[13]) = 0x09000000
-        const CNTR: u64 = 0x09000000_00000001;
+
+        // Since chacha20_block puts (cntr >> 32) at state[12] and (cntr as u32) at state[13]:
+        // High 32 bits (state[12]) = 0x00000001, Low 32 bits (state[13]) = 0x09000000
+        const CNTR: u64 = 0x00000001_09000000;
+
         const NONCE: [u32; 2] = [0x4a000000, 0x00000000];
 
         const EXPECTED: [u32; 16] = [
