@@ -2,6 +2,8 @@
 # 1. Host unit tests (instant, runs on your native OS)
 utest = "test -p rost_core"
 
+umiri = "miri test -p rost_core"
+
 # Run your RISC-V kernel in QEMU
 krun = "run --release -p kernel --target riscv64imac-unknown-none-elf -Z build-std=alloc,core,compiler_builtins"
 # Build your RISC-V kernel
