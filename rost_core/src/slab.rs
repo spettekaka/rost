@@ -19,6 +19,9 @@ struct FreeBlock {
 }
 
 impl Slab {
+    /// # Safety
+    ///
+    /// The addresses are guranteed by the caller to be correct
     pub unsafe fn init(start_addr: usize, slab_size: usize, block_size: usize) -> Self {
         let n_blocks = slab_size / block_size;
         Self {
@@ -73,11 +76,10 @@ impl FreeList {
     }
 
     fn pop(&mut self) -> Option<&'static mut FreeBlock> {
-        self.head.take().map(|block| {
-            self.head = block.next.take();
-            self.len -= 1;
-            block
-        })
+        let block = self.head.take()?;
+        self.head = block.next.take();
+        self.len -= 1;
+        Some(block)
     }
 
     pub fn len(&self) -> usize {

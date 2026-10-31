@@ -4,6 +4,9 @@ utest = "test -p rost_core"
 
 umiri = "miri test -p rost_core"
 
+hclippy = "clippy -p rost_core --lib --tests -- -D warnings"
+tclippy = "clippy --target riscv64imac-unknown-none-elf -- -D warnings"
+
 # Run your RISC-V kernel in QEMU
 krun = "run --release -p kernel --target riscv64imac-unknown-none-elf -Z build-std=alloc,core,compiler_builtins"
 # Build your RISC-V kernel

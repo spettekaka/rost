@@ -45,9 +45,7 @@ impl<T> Mutex<T> {
 
         // SAFETY: We hold the exclusive lock, and the closure signature
         // prevents the `&mut T` reference from escaping.
-        let result = f(unsafe { &mut *self.inner.get() });
-
-        result
+        f(unsafe { &mut *self.inner.get() })
     }
 
     pub fn lock(&self) -> Result<MutexGuard<'_, T>, MutexError> {

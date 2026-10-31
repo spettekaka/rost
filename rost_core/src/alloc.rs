@@ -21,6 +21,9 @@ pub struct Heap {
 }
 
 impl Heap {
+    /// # Safety
+    ///
+    /// The addresses are guaranteed to be correct by thec caller
     pub unsafe fn new(start_addr: usize, heap_size: usize) -> Self {
         let slab_size = heap_size / NUM_SLABS;
         unsafe {

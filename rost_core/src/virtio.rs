@@ -205,6 +205,12 @@ pub struct VirtIOBus {
     devices: Vec<VirtIODevice>,
 }
 
+impl Default for VirtIOBus {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VirtIOBus {
     pub const fn new() -> Self {
         Self {
@@ -212,6 +218,9 @@ impl VirtIOBus {
         }
     }
 
+    /// # Safety
+    ///
+    /// Qemu has 8 slots starting at VIRTIO_MMIO_BASE
     pub unsafe fn probe(&mut self) {
         for i in 0..8 {
             let base_addr = VIRTIO_MMIO_BASE + (i * VIRTIO_MMIO_STRIDE);

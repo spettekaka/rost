@@ -16,74 +16,50 @@ unsafe extern "C" {
 }
 
 pub fn KERNEL_STACK_START() -> usize {
-    unsafe {
-        return &__sstack as *const u8 as usize;
-    }
+    unsafe { &__sstack as *const u8 as usize }
 }
 
 pub fn KERNEL_STACK_END() -> usize {
-    unsafe {
-        return &__estack as *const u8 as usize;
-    }
+    unsafe { &__estack as *const u8 as usize }
 }
 
 pub fn HEAP_START() -> usize {
-    unsafe {
-        return &__sheap as *const u8 as usize;
-    }
+    unsafe { &__sheap as *const u8 as usize }
 }
 
 pub fn HEAP_END() -> usize {
-    unsafe {
-        return &__eheap as *const u8 as usize;
-    }
+    unsafe { &__eheap as *const u8 as usize }
 }
 
 pub fn HEAP_SIZE() -> usize {
-    unsafe {
-        return &_heap_size as *const u8 as usize;
-    }
+    unsafe { &_heap_size as *const u8 as usize }
 }
 
 pub fn TEXT_START() -> usize {
-    unsafe {
-        return &__stext as *const u8 as usize;
-    }
+    unsafe { &__stext as *const u8 as usize }
 }
 
 pub fn RODATA_START() -> usize {
-    unsafe {
-        return &__sdata as *const u8 as usize;
-    }
+    unsafe { &__sdata as *const u8 as usize }
 }
 
 pub fn RODATA_END() -> usize {
-    unsafe {
-        return &__edata as *const u8 as usize;
-    }
+    unsafe { &__edata as *const u8 as usize }
 }
 pub fn DATA_START() -> usize {
-    unsafe {
-        return &__sdata as *const u8 as usize;
-    }
+    unsafe { &__sdata as *const u8 as usize }
 }
 
 pub fn DATA_END() -> usize {
-    unsafe {
-        return &__edata as *const u8 as usize;
-    }
+    unsafe { &__edata as *const u8 as usize }
 }
 
 pub fn BSS_START() -> usize {
-    unsafe {
-        return &__sbss as *const u8 as usize;
-    }
+    unsafe { &__sbss as *const u8 as usize }
 }
 
 pub fn BSS_END() -> usize {
-    unsafe {
-        return &__ebss as *const u8 as usize;
-    }
+    unsafe { &__ebss as *const u8 as usize }
 }
 
 pub fn dump_symbols() {

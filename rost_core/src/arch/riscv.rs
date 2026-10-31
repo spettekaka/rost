@@ -11,7 +11,7 @@ mod offset {
 
 /// Build satp value from mode, asid and page table base addr
 pub fn build_satp(mode: usize, asid: usize, addr: usize) -> usize {
-    assert!(addr % PAGE_SIZE == 0);
+    assert!(addr.is_multiple_of(PAGE_SIZE));
     mode << 60 | (asid & 0xffff) << 44 | (addr >> 12) & 0xff_ffff_ffff
 }
 
@@ -24,18 +24,21 @@ pub fn uptime() -> Duration {
     Duration::from_nanos(time as u64 * 100)
 }
 
+/// # Safety
+///
+/// Addresses are valid on riscv
 pub fn time() -> usize {
-    unsafe { return core::ptr::read_volatile((offset::BASE + offset::MTIME) as *const usize) }
+    unsafe { core::ptr::read_volatile((offset::BASE + offset::MTIME) as *const usize) }
 }
 
 pub fn set_time(timer_val: usize) {
     let hart_id = thread_pointer();
 
     unsafe {
-        return core::ptr::write_volatile(
+        core::ptr::write_volatile(
             (offset::BASE + offset::MTIMECMP + hart_id) as *mut usize,
             timer_val,
-        );
+        )
     }
 }
 
@@ -50,6 +53,9 @@ pub fn thread_pointer() -> usize {
     hart_id
 }
 
+/// # Safety
+///
+/// The assembly is only valid for riscv
 pub unsafe fn clear_sie_ssoft() {
     const SSIP: usize = 1 << 1;
     unsafe {

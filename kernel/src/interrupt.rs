@@ -13,7 +13,7 @@ use log::{debug, error};
 /// Handle an interrupt from PLIC
 fn plic_interrupt() {
     let plic = plic::plic();
-    if let Some(id) = plic.next() {
+    if let Some(id) = plic.next_interrupt() {
         match id {
             InterruptId::Uart0 => uart_interrupt(),
             InterruptId::Virtio0 => error!("Unhandled Virtio0 interrupts"),

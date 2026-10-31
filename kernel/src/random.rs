@@ -117,7 +117,7 @@ fn get_virtio_entropy(entropy: &mut [u8]) {
 
 fn to_le_bytes(input: &[u32; 8]) -> [u8; 32] {
     let mut out = [0u8; 32];
-    for (chunk, &val) in out.chunks_exact_mut(4).zip(input.iter()) {
+    for (chunk, &val) in out.as_chunks_mut::<4>().0.iter_mut().zip(input.iter()) {
         chunk.copy_from_slice(&val.to_le_bytes()); // Or .to_be_bytes()
     }
     out

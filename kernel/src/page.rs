@@ -15,7 +15,7 @@ const PAGE_TABLE_ENTRIES: usize = 512;
 static mut PAGES: usize = 0;
 static mut PAGE_ALLOC_START: usize = 0;
 
-pub static mut KERNEL_PAGE_TABLE: SyncUnsafeCell<PageTable> = SyncUnsafeCell::new(PageTable::new());
+pub static KERNEL_PAGE_TABLE: SyncUnsafeCell<PageTable> = SyncUnsafeCell::new(PageTable::new());
 
 unsafe extern "C" {
     static _sheap: u8;
@@ -59,7 +59,7 @@ pub fn alloc(pages: usize) -> *mut u8 {
                 continue;
             }
 
-            let slice = core::slice::from_raw_parts_mut(ptr.add(i) as *mut Page, pages);
+            let slice = core::slice::from_raw_parts_mut(ptr.add(i), pages);
 
             if !slice.iter().all(|page| page.is_free()) {
                 continue;
@@ -121,6 +121,12 @@ impl PageFlag {
 #[repr(align(4096))]
 pub struct Page {
     pub flag: u8,
+}
+
+impl Default for Page {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Page {
@@ -290,6 +296,12 @@ impl PPN {
     }
 }
 
+impl Default for PageTable {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PageTable {
     pub const fn new() -> Self {
         Self {
@@ -310,12 +322,12 @@ impl PageTable {
 
     fn map_addr(&mut self, vaddr: usize, paddr: usize, flags: usize, level: usize) {
         assert!(
-            paddr % PAGE_SIZE == 0,
+            paddr.is_multiple_of(PAGE_SIZE),
             "physical address {:x} not aligned",
             paddr
         );
         assert!(
-            vaddr % PAGE_SIZE == 0,
+            vaddr.is_multiple_of(PAGE_SIZE),
             "virtual address {:x} not aligned",
             paddr
         );
@@ -397,7 +409,7 @@ impl PageTable {
 
     pub fn phy_addr_of(&self, vaddr: usize) -> Option<usize> {
         assert!(
-            vaddr % PAGE_SIZE == 0,
+            vaddr.is_multiple_of(PAGE_SIZE),
             "virtual address {:x} not aligned",
             vaddr
         );
@@ -450,7 +462,7 @@ impl PageTable {
                 println!(
                     "{}: 0x{:X} -> 0x{:X}",
                     i,
-                    (vpn << 0 | i) << (9 * level + 12),
+                    (vpn | i) << (9 * level + 12),
                     v.physical_addr().0
                 );
 
@@ -464,17 +476,15 @@ impl PageTable {
     }
 
     pub fn unmap(root: &mut PageTable) {
-        for lv2 in 0..PageTable::len() {
-            let ref entry_lv2 = root.entries[lv2];
-            if entry_lv2.valid() && entry_lv2.is_branch() {
-                let memaddr_lv1 = (entry_lv2.get_entry() & !0x3ff) << 2;
+        for lv2 in root.entries.iter().take(PageTable::len()) {
+            if lv2.valid() && lv2.is_branch() {
+                let memaddr_lv1 = (lv2.get_entry() & !0x3ff) << 2;
 
                 let table_lv1 = unsafe { (memaddr_lv1 as *mut PageTable).as_mut().unwrap() };
 
-                for lv1 in 0..PageTable::len() {
-                    let ref entry_lv1 = table_lv1.entries[lv1];
-                    if entry_lv1.valid() && entry_lv1.is_branch() {
-                        let memaddr_lv0 = (entry_lv1.get_entry() & !0x3ff) << 2;
+                for lv1 in table_lv1.entries.iter().take(PageTable::len()) {
+                    if lv1.valid() && lv1.is_branch() {
+                        let memaddr_lv0 = (lv1.get_entry() & !0x3ff) << 2;
                         dealloc(memaddr_lv0 as *mut u8);
                     }
                 }

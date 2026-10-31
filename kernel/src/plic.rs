@@ -13,7 +13,7 @@ use log::info;
 
 // PLIC mmio registers
 pub const PLIC_BASE: usize = 0x0c00_0000;
-const PLIC_PRIORITY_BASE: usize = PLIC_BASE + 0x0;
+const PLIC_PRIORITY_BASE: usize = PLIC_BASE;
 const PLIC_STHRESHOLD_BASE: usize = PLIC_BASE + 0x20_1000;
 const PLIC_PENDING: usize = PLIC_BASE + 0x1000;
 const _PLIC_MENABLE_BASE: usize = PLIC_BASE + 0x2000;
@@ -86,6 +86,12 @@ impl From<u32> for InterruptId {
 
 pub struct Plic;
 
+impl Default for Plic {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Plic {
     /// Create a new Plic instance
     pub const fn new() -> Self {
@@ -94,6 +100,10 @@ impl Plic {
 
     /// Initialize the PLIC.
     /// Enables an interrupt id.
+    ///
+    /// # Safety
+    ///
+    /// Only valid for riscv targets
     pub unsafe fn init(&mut self, id: InterruptId) {
         let enabled = PLIC_BASE as *mut u32;
         unsafe { enabled.add(id as usize).write_volatile(1) };
@@ -173,7 +183,7 @@ impl Plic {
     /// Get the next available interrupt
     ///
     /// The PLIC will sort by priority and return the ID of the pending interrupt
-    pub fn next(&mut self) -> Option<InterruptId> {
+    pub fn next_interrupt(&mut self) -> Option<InterruptId> {
         let reg = Self::sclaim(thread_pointer()) as *const u32;
 
         let id = unsafe { reg.read_volatile() };
@@ -212,6 +222,10 @@ pub fn plic() -> &'static mut Plic {
 }
 
 /// Initiate PLIC
+///
+/// # Safety
+///
+/// Only valid for riscv targets.
 /// Should only be called once
 pub unsafe fn init() {
     info!("Initating PLIC");

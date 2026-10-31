@@ -17,7 +17,7 @@ impl XorShift {
         x ^= x >> 17;
         x ^= x << 5;
         self.state = x;
-        return self.state.0;
+        self.state.0
     }
 }
 
