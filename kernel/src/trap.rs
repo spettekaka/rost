@@ -141,6 +141,26 @@ pub unsafe fn enable_interrupts() {
     }
 }
 
+/// Reads and clears the SIE bit in sstatus, returning whether it was previously enabled.
+pub fn disable_interrupts() -> bool {
+    let sstatus = register::sstatus::read();
+
+    // SAFETY: It is safe to disable interrupts
+    unsafe { register::sstatus::clear_sie() }
+
+    sstatus.sie()
+}
+
+/// Restores interrupts to the previous state.
+pub fn restore_interrupts(was_enabled: bool) {
+    if was_enabled {
+        // SAFETY: It is safe to disable interrupts
+        unsafe {
+            register::sstatus::set_sie();
+        }
+    }
+}
+
 /// Hart init
 ///
 /// Set the vector for handling supervisor mode

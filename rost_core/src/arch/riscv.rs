@@ -22,6 +22,10 @@ pub fn time() -> usize {
     riscv::register::time::read()
 }
 
+pub fn time_u64() -> u64 {
+    riscv::register::time::read64()
+}
+
 /// Sets stimecmp to the value passed
 ///
 /// # Safety
