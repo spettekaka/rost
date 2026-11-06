@@ -69,6 +69,14 @@ pub fn expose_cycles() {
     }
 }
 
+pub fn expose_time() {
+    const MENVCFG_STCE: usize = 1 << 63; // RV64: Bit 63 enables STCE
+    unsafe {
+        riscv::register::mcounteren::set_tm();
+        asm!("csrs menvcfg, {}", in(reg) MENVCFG_STCE);
+    }
+}
+
 pub fn cycles() -> u64 {
     let cycles: u64;
     unsafe {
