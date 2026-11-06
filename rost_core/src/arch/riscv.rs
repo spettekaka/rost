@@ -3,12 +3,6 @@ use crate::consts::PAGE_SIZE;
 use core::arch::asm;
 use core::time::Duration;
 
-mod offset {
-    pub const BASE: usize = 0x0200_0000;
-    pub const MTIME: usize = 0xbff8;
-    pub const MTIMECMP: usize = 0x4000;
-}
-
 /// Build satp value from mode, asid and page table base addr
 pub fn build_satp(mode: usize, asid: usize, addr: usize) -> usize {
     assert!(addr.is_multiple_of(PAGE_SIZE));
@@ -24,21 +18,19 @@ pub fn uptime() -> Duration {
     Duration::from_nanos(time as u64 * 100)
 }
 
-/// # Safety
-///
-/// Addresses are valid on riscv
 pub fn time() -> usize {
-    unsafe { core::ptr::read_volatile((offset::BASE + offset::MTIME) as *const usize) }
+    riscv::register::time::read()
 }
 
+/// Sets stimecmp to the value passed
+///
+/// # Safety
+///
+/// Assumes riscv64
 pub fn set_time(timer_val: usize) {
-    let hart_id = thread_pointer();
-
     unsafe {
-        core::ptr::write_volatile(
-            (offset::BASE + offset::MTIMECMP + hart_id) as *mut usize,
-            timer_val,
-        )
+        // Direct write to the stimecmp CSR (CSR address 0x14D)
+        asm!("csrw stimecmp, {val}", val = in(reg) timer_val);
     }
 }
 
@@ -66,6 +58,13 @@ pub unsafe fn clear_sie_ssoft() {
 pub fn expose_cycles() {
     unsafe {
         riscv::register::mcounteren::set_cy();
+    }
+}
+
+///  Disable M-mode timer interrupt so M-mode never interferes with S-mode timer management
+pub fn disable_mtime_interrupts() {
+    unsafe {
+        asm!("csrc mie, {}", in(reg) (1 << 7));
     }
 }
 

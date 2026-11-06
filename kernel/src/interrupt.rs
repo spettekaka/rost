@@ -62,7 +62,7 @@ fn timer_interrupt() {
 pub fn handle_interrupt(code: u32) {
     match code {
         9 => plic_interrupt(),
-        1 => timer_interrupt(),
+        5 => timer_interrupt(),
         _ => error!("Unknown Interrupt Code: {}", code),
     }
 }
