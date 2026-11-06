@@ -1,14 +1,47 @@
+extern crate alloc;
+
 use core::ptr::read_volatile;
 use core::sync::atomic::Ordering;
 
 use crate::arch::riscv;
+use crate::interrupt;
 use crate::plic::{self, InterruptId};
+use crate::timer::TIMER_QUEUE;
+use crate::trap::{disable_interrupts, restore_interrupts};
 use crate::uart::uart_interrupt;
 
+use rost_core::timer::TimerAction;
 use rost_core::virtio::rng::{ENTROPY_READY, RNG_QUEUE};
 use rost_core::virtio::virtio_mmio::LegacyMmioTransport;
 
 use log::{debug, error};
+
+struct InterruptGuard {
+    was_enabled: bool,
+}
+
+impl InterruptGuard {
+    pub fn new() -> Self {
+        Self {
+            was_enabled: disable_interrupts(),
+        }
+    }
+}
+
+impl Drop for InterruptGuard {
+    fn drop(&mut self) {
+        restore_interrupts(self.was_enabled);
+    }
+}
+
+/// Executes the closure `f` with local interrupts disabled on the current hart.
+pub fn free<F, R>(f: F) -> R
+where
+    F: FnOnce() -> R,
+{
+    let _guard = InterruptGuard::new();
+    f()
+}
 
 /// Handle an interrupt from PLIC
 fn plic_interrupt() {
@@ -49,18 +82,34 @@ fn plic_interrupt() {
 /// Handle a software timer interrupt
 fn timer_interrupt() {
     debug!("Tick");
-    unsafe {
-        riscv::clear_sie_ssoft();
-    };
 
-    // 1. Next deadline from your software timer queue
-    let now = riscv::time();
+    let mut expired = alloc::vec::Vec::new();
+    let now = riscv::time_u64();
 
-    // Reprogramming automatically clears the pending STIP condition
-    let next_deadline = now + 100_000_00; // or u64::MAX if queue is empty
-    riscv::set_time(next_deadline);
+    interrupt::free(|| {
+        TIMER_QUEUE.with_lock(|queue| {
+            while let Some(entry) = queue.pop_expired(now) {
+                expired.push(entry);
+            }
 
-    // 2. Dispatch expired timer tasks
+            // Reprogram comparator to the next pending deadline
+            if let Some(next) = queue.peek() {
+                riscv::set_time(next.deadline.try_into().unwrap());
+            } else {
+                riscv::set_time(usize::MAX);
+            }
+        });
+    });
+
+    for entry in expired {
+        match entry.action {
+            TimerAction::Callback(cb) => cb(),
+            TimerAction::Periodic(period, ref cb) => {
+                cb();
+                crate::timer::register_timer(period, entry.action);
+            }
+        }
+    }
 }
 
 /// Handle a external interrupt

@@ -10,6 +10,7 @@ pub mod page;
 pub mod plic;
 pub mod random;
 pub mod symbols;
+pub mod timer;
 pub mod trap;
 pub mod uart;
 
