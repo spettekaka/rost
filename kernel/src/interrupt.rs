@@ -52,6 +52,15 @@ fn timer_interrupt() {
     unsafe {
         riscv::clear_sie_ssoft();
     };
+
+    // 1. Next deadline from your software timer queue
+    let now = riscv::time();
+
+    // Reprogramming automatically clears the pending STIP condition
+    let next_deadline = now + 100_000_00; // or u64::MAX if queue is empty
+    riscv::set_time(next_deadline);
+
+    // 2. Dispatch expired timer tasks
 }
 
 /// Handle a external interrupt
