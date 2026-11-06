@@ -49,6 +49,8 @@ pub fn timer_init() {
             fn timervec();
         }
 
+        // Expose timer registers to S-mode
+        arch::riscv::expose_time();
         let hart = arch::riscv::thread_pointer();
         increment_mtimecmp(hart, TIMER_INTERVAL);
 
