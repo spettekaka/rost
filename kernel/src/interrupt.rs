@@ -1,18 +1,14 @@
 extern crate alloc;
 
-use core::ptr::read_volatile;
-use core::sync::atomic::Ordering;
-
 use crate::arch::riscv;
 use crate::interrupt;
 use crate::plic::{self, InterruptId};
+use crate::random::handle_rng_interrupt;
 use crate::timer::TIMER_QUEUE;
 use crate::trap::{disable_interrupts, restore_interrupts};
 use crate::uart::uart_interrupt;
 
 use rost_core::timer::TimerAction;
-use rost_core::virtio::rng::{ENTROPY_READY, RNG_QUEUE};
-use rost_core::virtio::virtio_mmio::LegacyMmioTransport;
 
 use log::{debug, error};
 
@@ -56,23 +52,7 @@ fn plic_interrupt() {
             InterruptId::Virtio4 => error!("Unhandled Virtio4 interrupts"),
             InterruptId::Virtio5 => error!("Unhandled Virtio5 interrupts"),
             InterruptId::Virtio6 => error!("Unhandled Virtio6 interrupts"),
-            InterruptId::Virtio7 => {
-                // Slot 7: virtio-rng (0x1000_8000)
-                let mut transport = LegacyMmioTransport::new(0x1000_8000);
-
-                // Acknowledge on the VirtIO device so it lowers its interrupt line
-                let status = transport.interrupt_status();
-                transport.ack_interrupt(status);
-
-                // Read `RNG_QUEUE.used.index` — random bytes are now in your buffer!
-                unsafe {
-                    debug!(
-                        "S-mode IRQ 8: RNG complete, used.idx={}",
-                        read_volatile(&raw const RNG_QUEUE.used.index)
-                    );
-                }
-                ENTROPY_READY.store(true, Ordering::Release);
-            }
+            InterruptId::Virtio7 => handle_rng_interrupt(),
             InterruptId::Unknown => error!("Unkown PLIC interrupt ({:?}", id),
         }
         plic.complete(id as u32);
@@ -104,9 +84,9 @@ fn timer_interrupt() {
     for entry in expired {
         match entry.action {
             TimerAction::Callback(cb) => cb(),
-            TimerAction::Periodic(period, ref cb) => {
+            TimerAction::Periodic(_, ref cb) => {
                 cb();
-                crate::timer::register_timer(period, entry.action);
+                crate::timer::register_timer_periodic(entry.action);
             }
         }
     }
