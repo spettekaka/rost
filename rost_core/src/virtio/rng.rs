@@ -1,5 +1,5 @@
 use core::ptr::{read_volatile, write_volatile};
-use core::sync::atomic::{AtomicBool, Ordering, fence};
+use core::sync::atomic::{Ordering, fence};
 
 use crate::virtio::common::{LegacyVirtqueue, QUEUE_SIZE};
 use crate::virtio::virtio_mmio::{LegacyMmioTransport, PAGE_SIZE};
@@ -7,9 +7,6 @@ use crate::virtio::{DescFlags, DeviceStatus};
 
 // TODO: Use page allocator to get memory, will require changes to legacy virtqueue
 pub static mut RNG_QUEUE: LegacyVirtqueue = unsafe { core::mem::zeroed() };
-
-// Atomic flag so main kernel code knows when the interrupt has finished filling the buffer
-pub static ENTROPY_READY: AtomicBool = AtomicBool::new(false);
 
 pub struct VirtIORng {
     mmio: LegacyMmioTransport,
@@ -40,17 +37,20 @@ impl VirtIORng {
         self.mmio.add_status(DeviceStatus::DRIVER_OK);
     }
 
-    /// Only descriptor '0' is used
-    pub fn request_entropy(&mut self, buf: &mut [u8]) {
-        ENTROPY_READY.store(false, Ordering::Release);
-
+    /// Submits descriptor 0 to fill `buf[..len]` with entropy asynchronously.
+    ///
+    /// # Safety
+    ///
+    /// `buf` must point to `len` bytes of valid, writable physical memory that
+    /// outlives the DMA transfer and is not accessed until completion IRQ.
+    pub unsafe fn request_entropy(&mut self, buf: *mut u8, len: u32) {
         unsafe {
             // Ensure interrupts are NOT suppressed on the available ring
             write_volatile(&raw mut RNG_QUEUE.avail.flags, 0);
 
             // Populate descriptor 0
-            write_volatile(&mut RNG_QUEUE.desc[0].addr, buf.as_mut_ptr() as u64);
-            write_volatile(&mut RNG_QUEUE.desc[0].len, buf.len() as u32);
+            write_volatile(&mut RNG_QUEUE.desc[0].addr, buf as u64);
+            write_volatile(&mut RNG_QUEUE.desc[0].len, len as u32);
             write_volatile(&mut RNG_QUEUE.desc[0].flags, DescFlags::WRITE.into());
             write_volatile(&mut RNG_QUEUE.desc[0].next, 0);
 

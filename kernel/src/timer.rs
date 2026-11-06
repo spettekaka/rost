@@ -32,3 +32,10 @@ pub fn register_timer(delay: u64, action: TimerAction) -> TimerId {
 
     id
 }
+
+pub fn register_timer_periodic(action: TimerAction) -> Option<TimerId> {
+    match action {
+        TimerAction::Periodic(period, _) => Some(register_timer(period, action)),
+        _ => None,
+    }
+}

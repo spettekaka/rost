@@ -1,17 +1,18 @@
+extern crate alloc;
+
 use core::{
-    cell::UnsafeCell,
-    sync::atomic::{AtomicUsize, Ordering},
+    cell::{SyncUnsafeCell, UnsafeCell},
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
 };
+
+use alloc::boxed::Box;
 
 use rost_core::{
     consts::MAX_HARTS,
     random::KernelCsprng,
     random::chacha20::ChaCha20Csprng,
     sync::spinlock::Mutex,
-    virtio::{
-        self,
-        rng::{ENTROPY_READY, VirtIORng},
-    },
+    virtio::{self, rng::VirtIORng},
 };
 
 /// Global generation counter (0 = uninitialized, >=1 = seeded epoch).
@@ -19,6 +20,11 @@ use rost_core::{
 static BASE_GENERATION: AtomicUsize = AtomicUsize::new(0);
 
 static BASE_CSPRNG: Mutex<ChaCha20Csprng> = Mutex::new({ ChaCha20Csprng::unseeded() });
+
+/// Keep track if reesed has already been triggered
+static RESEED_TRIGGERED: AtomicBool = AtomicBool::new(false);
+
+static ENTROPY_BUF: SyncUnsafeCell<[u8; 32]> = SyncUnsafeCell::new([0u8; 32]);
 
 pub struct HartEntropySrc {
     generation: usize,
@@ -48,14 +54,26 @@ static mut PER_HART_SRSC: [HartEntropySrc; MAX_HARTS] = [
 ];
 
 pub fn init() {
-    let mut entropy = [0u8; 32];
+    request_reseed();
 
-    get_virtio_entropy(&mut entropy);
+    // Initiate a reseed tiemr
+    let reseed = rost_core::timer::TimerAction::Periodic(10_000_000, Box::new(request_reseed));
 
-    BASE_CSPRNG.with_lock(|csprng| {
-        csprng.seed(&entropy);
-        BASE_GENERATION.store(1, Ordering::Release)
-    });
+    crate::timer::register_timer_periodic(reseed);
+}
+
+/// Non-blocking, safe to call from a interrupt context
+///
+/// Returns if reseed is already ongoing
+pub fn request_reseed() {
+    if RESEED_TRIGGERED
+        .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+        .is_err()
+    {
+        // Ressed already in motion, return.
+        return;
+    }
+    get_virtio_entropy();
 }
 
 pub fn crng_reseed(entropy: &mut [u8; 32]) {
@@ -103,15 +121,14 @@ pub fn get_random_bytes(dest: &mut [u8]) {
     }
 }
 
-fn get_virtio_entropy(entropy: &mut [u8]) {
+fn get_virtio_entropy() {
     let (_, mmio) = virtio::take_transport(virtio::VirtIODeviceType::EntropySource)
         .expect("Failed to get rng_device");
     let mut rng_device = VirtIORng::new(mmio);
 
-    rng_device.request_entropy(entropy);
-
-    while !ENTROPY_READY.load(Ordering::Acquire) {
-        crate::arch::riscv::wait();
+    // Safety: RESEED_TRIGGERED ensures exclusive access
+    unsafe {
+        rng_device.request_entropy(ENTROPY_BUF.get().cast::<u8>(), 32);
     }
 }
 
@@ -121,4 +138,19 @@ fn to_le_bytes(input: &[u32; 8]) -> [u8; 32] {
         chunk.copy_from_slice(&val.to_le_bytes()); // Or .to_be_bytes()
     }
     out
+}
+
+pub fn handle_rng_interrupt() {
+    let (_, mut mmio) = virtio::take_transport(virtio::VirtIODeviceType::EntropySource)
+        .expect("Failed to get rng_device");
+
+    let status = mmio.interrupt_status();
+    mmio.ack_interrupt(status);
+
+    if RESEED_TRIGGERED.load(Ordering::Acquire) {
+        // SAFETY: IRQ handler owns `ENTROPY_BUF` until release below.
+        let entropy = unsafe { &mut *ENTROPY_BUF.get() };
+        crng_reseed(entropy);
+        RESEED_TRIGGERED.store(false, Ordering::Release);
+    }
 }
