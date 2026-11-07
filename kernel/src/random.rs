@@ -77,18 +77,20 @@ pub fn request_reseed() {
 }
 
 pub fn crng_reseed(entropy: &mut [u8; 32]) {
-    BASE_CSPRNG.with_lock(|csprng| {
-        csprng.seed(entropy);
+    crate::interrupt::free(|| {
+        BASE_CSPRNG.with_lock(|csprng| {
+            csprng.seed(entropy);
 
-        entropy.fill(0);
-        core::hint::black_box(&entropy);
+            entropy.fill(0);
+            core::hint::black_box(&entropy);
 
-        // Increment global generation (wrapping to 1 if it ever overflows usize::MAX)
-        let next_gen = BASE_GENERATION
-            .load(Ordering::Relaxed)
-            .wrapping_add(1)
-            .max(1);
-        BASE_GENERATION.store(next_gen, Ordering::Release);
+            // Increment global generation (wrapping to 1 if it ever overflows usize::MAX)
+            let next_gen = BASE_GENERATION
+                .load(Ordering::Relaxed)
+                .wrapping_add(1)
+                .max(1);
+            BASE_GENERATION.store(next_gen, Ordering::Release);
+        });
     });
 }
 
@@ -106,16 +108,18 @@ pub fn get_random_bytes(dest: &mut [u8]) {
         let base_gen = BASE_GENERATION.load(Ordering::Relaxed);
 
         if generation != base_gen {
-            BASE_CSPRNG.with_lock(|base_csprng| {
-                let seed = base_csprng.fast_key_erasure();
-                let mut seed = to_le_bytes(&seed);
-                csprng.seed(&seed);
+            crate::interrupt::free(|| {
+                BASE_CSPRNG.with_lock(|base_csprng| {
+                    let seed = base_csprng.fast_key_erasure();
+                    let mut seed = to_le_bytes(&seed);
+                    csprng.seed(&seed);
 
-                seed.fill(0);
-                core::hint::black_box(&seed);
-            });
-            PER_HART_SRSC[hart].generation = base_gen;
-        }
+                    seed.fill(0);
+                    core::hint::black_box(&seed);
+                });
+                PER_HART_SRSC[hart].generation = base_gen;
+            })
+        };
 
         csprng.fill_bytes(dest);
     }
