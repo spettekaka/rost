@@ -20,7 +20,7 @@ pub fn register_timer(delay: u64, action: TimerAction) -> TimerId {
 
     crate::interrupt::free(|| {
         TIMER_QUEUE.with_lock(|queue| {
-            let reprogram_needed = queue.peek().map_or(true, |next| deadline < next.deadline);
+            let reprogram_needed = queue.peek().is_none_or(|next| deadline < next.deadline);
 
             queue.push(entry);
 

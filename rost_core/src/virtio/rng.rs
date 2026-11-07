@@ -50,7 +50,7 @@ impl VirtIORng {
 
             // Populate descriptor 0
             write_volatile(&mut RNG_QUEUE.desc[0].addr, buf as u64);
-            write_volatile(&mut RNG_QUEUE.desc[0].len, len as u32);
+            write_volatile(&mut RNG_QUEUE.desc[0].len, len);
             write_volatile(&mut RNG_QUEUE.desc[0].flags, DescFlags::WRITE.into());
             write_volatile(&mut RNG_QUEUE.desc[0].next, 0);
 
