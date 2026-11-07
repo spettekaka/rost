@@ -117,17 +117,17 @@ mod tests {
         let e1 = TimerEntry {
             id: 1,
             deadline: 10,
-            action: TimerAction::Callback(std::boxed::Box::new(|| return)),
+            action: TimerAction::Callback(std::boxed::Box::new(|| {})),
         };
         let e2 = TimerEntry {
             id: 2,
             deadline: 20,
-            action: TimerAction::Callback(std::boxed::Box::new(|| return)),
+            action: TimerAction::Callback(std::boxed::Box::new(|| {})),
         };
         let e3 = TimerEntry {
             id: 3,
             deadline: 30,
-            action: TimerAction::Callback(std::boxed::Box::new(|| return)),
+            action: TimerAction::Callback(std::boxed::Box::new(|| {})),
         };
 
         queue.push(e1);
@@ -152,7 +152,7 @@ mod tests {
         let e1 = TimerEntry {
             id: 0,
             deadline: 10,
-            action: TimerAction::Callback(std::boxed::Box::new(|| return)),
+            action: TimerAction::Callback(std::boxed::Box::new(|| {})),
         };
 
         assert!(queue.peek() == Some(&e1));
@@ -160,15 +160,16 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::len_zero)]
     fn test_empty() {
         let mut queue = TimerQueue::default();
 
         assert!(queue.is_empty());
-        assert!(queue.peek() == None);
+        assert!(queue.peek().is_none());
         assert!(queue.len() == 0);
-        assert!(queue.next_deadline() == None);
-        assert!(queue.cancel(1) == false);
-        assert!(queue.pop_expired(10) == None);
+        assert!(queue.next_deadline().is_none());
+        assert!(!queue.cancel(1));
+        assert!(queue.pop_expired(10).is_none());
     }
 
     #[test]
@@ -178,10 +179,10 @@ mod tests {
         let e2 = TimerEntry {
             id: 2,
             deadline: 20,
-            action: TimerAction::Callback(std::boxed::Box::new(|| return)),
+            action: TimerAction::Callback(std::boxed::Box::new(|| {})),
         };
 
-        assert!(queue.cancel(1) == true);
+        assert!(queue.cancel(1));
         assert!(queue.peek() == Some(&e2));
         assert!(queue.len() == 2);
     }
@@ -204,13 +205,13 @@ mod tests {
         let e1 = TimerEntry {
             id: 1,
             deadline: 10,
-            action: TimerAction::Callback(std::boxed::Box::new(|| return)),
+            action: TimerAction::Callback(std::boxed::Box::new(|| {})),
         };
 
         let e2 = TimerEntry {
             id: 2,
             deadline: 20,
-            action: TimerAction::Callback(std::boxed::Box::new(|| return)),
+            action: TimerAction::Callback(std::boxed::Box::new(|| {})),
         };
 
         assert!(entry == Some(e1));
