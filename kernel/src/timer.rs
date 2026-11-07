@@ -25,7 +25,7 @@ pub fn register_timer(delay: u64, action: TimerAction) -> TimerId {
             queue.push(entry);
 
             if reprogram_needed {
-                arch::riscv::set_time(deadline.try_into().unwrap());
+                arch::riscv::set_time(deadline);
             }
         })
     });

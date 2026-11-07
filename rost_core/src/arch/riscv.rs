@@ -31,7 +31,7 @@ pub fn time_u64() -> u64 {
 /// # Safety
 ///
 /// Assumes riscv64
-pub fn set_time(timer_val: usize) {
+pub fn set_time(timer_val: u64) {
     unsafe {
         // Direct write to the stimecmp CSR (CSR address 0x14D)
         asm!("csrw stimecmp, {val}", val = in(reg) timer_val);

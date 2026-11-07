@@ -73,11 +73,8 @@ fn timer_interrupt() {
             }
 
             // Reprogram comparator to the next pending deadline
-            if let Some(next) = queue.peek() {
-                riscv::set_time(next.deadline.try_into().unwrap());
-            } else {
-                riscv::set_time(usize::MAX);
-            }
+            let timestamp = queue.next_deadline().unwrap_or(u64::MAX);
+            riscv::set_time(timestamp);
         });
     });
 
