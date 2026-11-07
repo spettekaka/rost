@@ -61,6 +61,12 @@ pub struct TimerQueue {
     heap: BinaryHeap<TimerEntry>,
 }
 
+impl Default for TimerQueue {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TimerQueue {
     pub const fn new() -> Self {
         Self {
