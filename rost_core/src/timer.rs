@@ -106,3 +106,114 @@ impl TimerQueue {
         self.heap.is_empty()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn prepare() -> TimerQueue {
+        let mut queue = TimerQueue::default();
+
+        let e1 = TimerEntry {
+            id: 1,
+            deadline: 10,
+            action: TimerAction::Callback(std::boxed::Box::new(|| return)),
+        };
+        let e2 = TimerEntry {
+            id: 2,
+            deadline: 20,
+            action: TimerAction::Callback(std::boxed::Box::new(|| return)),
+        };
+        let e3 = TimerEntry {
+            id: 3,
+            deadline: 30,
+            action: TimerAction::Callback(std::boxed::Box::new(|| return)),
+        };
+
+        queue.push(e1);
+        queue.push(e2);
+        queue.push(e3);
+
+        queue
+    }
+
+    #[test]
+    fn test_new() {
+        let queue = prepare();
+
+        assert!(queue.len() == 3);
+        assert!(!queue.is_empty());
+    }
+
+    #[test]
+    fn test_peek() {
+        let queue = prepare();
+
+        let e1 = TimerEntry {
+            id: 0,
+            deadline: 10,
+            action: TimerAction::Callback(std::boxed::Box::new(|| return)),
+        };
+
+        assert!(queue.peek() == Some(&e1));
+        assert!(queue.len() == 3);
+    }
+
+    #[test]
+    fn test_empty() {
+        let mut queue = TimerQueue::default();
+
+        assert!(queue.is_empty());
+        assert!(queue.peek() == None);
+        assert!(queue.len() == 0);
+        assert!(queue.next_deadline() == None);
+        assert!(queue.cancel(1) == false);
+        assert!(queue.pop_expired(10) == None);
+    }
+
+    #[test]
+    fn test_cancel() {
+        let mut queue = prepare();
+
+        let e2 = TimerEntry {
+            id: 2,
+            deadline: 20,
+            action: TimerAction::Callback(std::boxed::Box::new(|| return)),
+        };
+
+        assert!(queue.cancel(1) == true);
+        assert!(queue.peek() == Some(&e2));
+        assert!(queue.len() == 2);
+    }
+
+    #[test]
+    fn test_next_deadline() {
+        let queue = prepare();
+
+        let next_deadline = queue.next_deadline();
+
+        assert!(next_deadline == Some(10));
+    }
+
+    #[test]
+    fn test_pop_expired() {
+        let mut queue = prepare();
+
+        let entry = queue.pop_expired(10);
+
+        let e1 = TimerEntry {
+            id: 1,
+            deadline: 10,
+            action: TimerAction::Callback(std::boxed::Box::new(|| return)),
+        };
+
+        let e2 = TimerEntry {
+            id: 2,
+            deadline: 20,
+            action: TimerAction::Callback(std::boxed::Box::new(|| return)),
+        };
+
+        assert!(entry == Some(e1));
+        assert!(queue.peek() == Some(&e2));
+    }
+}
