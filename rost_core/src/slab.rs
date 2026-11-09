@@ -1,5 +1,5 @@
 use core::alloc::{AllocError, Layout};
-use core::ptr;
+use core::ptr::{self, NonNull};
 
 pub struct Slab {
     capacity: usize,
@@ -10,12 +10,16 @@ pub struct Slab {
 #[derive(Default)]
 struct FreeList {
     len: usize,
-    head: Option<&'static mut FreeBlock>,
+    head: Option<NonNull<FreeBlock>>,
 }
+
+// SAFETY: FreeList owns the memory blocks in the slab and is only accessed
+// through &mut Slab (synchronized externally, e.g., via Mutex in LockedHeap).
+unsafe impl Send for FreeList {}
 
 #[derive(Default)]
 struct FreeBlock {
-    next: Option<&'static mut FreeBlock>,
+    next: Option<NonNull<FreeBlock>>,
 }
 
 impl Slab {
@@ -45,15 +49,15 @@ impl Slab {
 
     pub fn allocate(&mut self, _layout: Layout) -> Result<*mut u8, AllocError> {
         match self.free_list.pop() {
-            Some(block) => Ok(block.addr() as *mut u8),
+            Some(block) => Ok(block.as_ptr().cast::<u8>()),
             None => Err(AllocError),
         }
     }
 
     pub fn deallocate(&mut self, ptr: *mut u8) {
-        let ptr = ptr as *mut FreeBlock;
+        let block = NonNull::new(ptr.cast::<FreeBlock>()).expect("cannot deallocate null pointer");
         unsafe {
-            self.free_list.push(&mut *ptr);
+            self.free_list.push(block);
         }
     }
 }
@@ -63,32 +67,31 @@ impl FreeList {
         let mut free_list = Self { len: 0, head: None };
 
         for i in (0..blocks).rev() {
-            let block = (start_addr + i * block_size) as *mut FreeBlock;
-            unsafe { free_list.push(&mut *block) };
+            let ptr = ptr::with_exposed_provenance_mut::<FreeBlock>(start_addr + i * block_size);
+            let block = NonNull::new(ptr).expect("slab block address cannot be null");
+            unsafe { free_list.push(block) };
         }
         free_list
     }
 
-    fn push(&mut self, block: &'static mut FreeBlock) {
-        block.next = self.head.take();
+    unsafe fn push(&mut self, block: NonNull<FreeBlock>) {
+        unsafe {
+            block.as_ptr().write(FreeBlock {
+                next: self.head.take(),
+            });
+        }
         self.len += 1;
         self.head = Some(block);
     }
 
-    fn pop(&mut self) -> Option<&'static mut FreeBlock> {
+    fn pop(&mut self) -> Option<NonNull<FreeBlock>> {
         let block = self.head.take()?;
-        self.head = block.next.take();
+        self.head = unsafe { (*block.as_ptr()).next.take() };
         self.len -= 1;
         Some(block)
     }
 
     pub fn len(&self) -> usize {
         self.len
-    }
-}
-
-impl FreeBlock {
-    fn addr(&self) -> usize {
-        ptr::from_ref(self).addr()
     }
 }
