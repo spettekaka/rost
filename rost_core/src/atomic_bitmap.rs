@@ -280,3 +280,410 @@ impl AtomicPageAllocator {
         ptr::without_provenance_mut(base + (idx << PAGE_ORDER))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::sync::atomic::AtomicU8;
+    use std::boxed::Box;
+    use std::vec::Vec;
+
+    const TEST_BASE: usize = 0x1000_0000;
+
+    fn make_allocator(base: usize, end: usize) -> Box<AtomicPageAllocator> {
+        let alloc = Box::new(AtomicPageAllocator::new());
+        alloc.init(base, end);
+        alloc
+    }
+
+    fn make_allocator_pages(pages: usize) -> Box<AtomicPageAllocator> {
+        make_allocator(TEST_BASE, TEST_BASE + pages * PAGE_SIZE)
+    }
+
+    fn page_index(base: usize, ptr: *mut u8) -> usize {
+        let addr = ptr.addr();
+        assert!(addr >= base, "pointer {addr:#x} below base {base:#x}");
+        assert!(
+            (addr - base).is_multiple_of(PAGE_SIZE),
+            "pointer {addr:#x} not page-aligned relative to {base:#x}"
+        );
+        (addr - base) >> PAGE_ORDER
+    }
+
+    fn check_and_claim(owned: &[AtomicU8], base: usize, ptr: *mut u8, pages: usize) {
+        let start = page_index(base, ptr);
+        assert!(start + pages <= owned.len());
+        for slot in &owned[start..start + pages] {
+            assert_eq!(
+                slot.swap(1, Ordering::AcqRel),
+                0,
+                "overlapping page allocation detected"
+            );
+        }
+    }
+
+    fn release_and_dealloc(
+        alloc: &AtomicPageAllocator,
+        owned: &[AtomicU8],
+        base: usize,
+        ptr: *mut u8,
+        pages: usize,
+    ) {
+        let start = page_index(base, ptr);
+        assert!(start + pages <= owned.len());
+        for slot in &owned[start..start + pages] {
+            assert_eq!(slot.swap(0, Ordering::Release), 1);
+        }
+        alloc.dealloc(ptr, pages);
+    }
+
+    #[test]
+    fn test_new_and_default_uninitialized() {
+        let alloc_new = Box::new(AtomicPageAllocator::new());
+        let alloc_def = Box::<AtomicPageAllocator>::default();
+
+        for alloc in [&alloc_new, &alloc_def] {
+            assert_eq!(alloc.usage(), 0);
+            assert!(alloc.alloc(0).is_none());
+            assert!(alloc.alloc(1).is_none());
+            assert!(alloc.alloc(4).is_none());
+            alloc.dealloc(ptr::null_mut(), 0);
+            assert_eq!(alloc.usage(), 0);
+        }
+    }
+
+    #[test]
+    fn test_init_alignment_and_reinit() {
+        // base_addr rounds up to TEST_BASE + PAGE_SIZE; end_addr rounds down to TEST_BASE + 3 * PAGE_SIZE.
+        let alloc = make_allocator(TEST_BASE + 1, TEST_BASE + 3 * PAGE_SIZE + 500);
+        let expected_base = TEST_BASE + PAGE_SIZE;
+
+        assert_eq!(alloc.usage(), 0);
+        let p0 = alloc.alloc(1).expect("first aligned page should allocate");
+        let p1 = alloc.alloc(1).expect("second aligned page should allocate");
+        assert_eq!(p0.addr(), expected_base);
+        assert_eq!(p1.addr(), expected_base + PAGE_SIZE);
+        assert_eq!(alloc.usage(), 2);
+        assert!(alloc.alloc(1).is_none());
+
+        // Re-initializing should reset usage, bitmap, and bounds.
+        let new_base = TEST_BASE + 0x10_0000;
+        alloc.init(new_base, new_base + 4 * PAGE_SIZE);
+        assert_eq!(alloc.usage(), 0);
+
+        let all = alloc.alloc(4).expect("re-initialized pool should be free");
+        assert_eq!(all.addr(), new_base);
+        assert_eq!(alloc.usage(), 4);
+        assert!(alloc.alloc(1).is_none());
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid page pool supplied")]
+    fn test_init_equal_bounds_panics() {
+        let alloc = Box::new(AtomicPageAllocator::new());
+        alloc.init(TEST_BASE, TEST_BASE);
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid page pool supplied")]
+    fn test_init_inverted_bounds_panics() {
+        let alloc = Box::new(AtomicPageAllocator::new());
+        alloc.init(TEST_BASE + PAGE_SIZE, TEST_BASE);
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid page pool supplied")]
+    fn test_init_sub_page_range_panics() {
+        let alloc = Box::new(AtomicPageAllocator::new());
+        alloc.init(TEST_BASE + 1, TEST_BASE + 2 * PAGE_SIZE - 1);
+    }
+
+    #[test]
+    fn test_init_clamps_to_max_pages() {
+        let alloc = make_allocator(TEST_BASE, TEST_BASE + (MAX_PAGES + 16) * PAGE_SIZE);
+
+        let all = alloc
+            .alloc(MAX_PAGES)
+            .expect("MAX_PAGES contiguous allocation should succeed");
+        assert_eq!(all.addr(), TEST_BASE);
+        assert_eq!(alloc.usage(), MAX_PAGES);
+        assert!(alloc.alloc(1).is_none());
+
+        alloc.dealloc(all, MAX_PAGES);
+        assert_eq!(alloc.usage(), 0);
+        assert!(alloc.alloc(1).is_some());
+    }
+
+    #[test]
+    fn test_alloc_zero_and_dealloc_zero() {
+        let alloc = make_allocator_pages(4);
+
+        assert!(alloc.alloc(0).is_none());
+        assert_eq!(alloc.usage(), 0);
+
+        let ptr = alloc
+            .alloc(1)
+            .expect("single page allocation should succeed");
+        alloc.dealloc(ptr, 0);
+        alloc.dealloc(ptr::null_mut(), 0);
+        assert_eq!(alloc.usage(), 1);
+
+        alloc.dealloc(ptr, 1);
+        assert_eq!(alloc.usage(), 0);
+    }
+
+    #[test]
+    fn test_single_page_exhaust_and_reuse() {
+        const PAGES: usize = 10;
+        let alloc = make_allocator_pages(PAGES);
+        let mut ptrs = Vec::with_capacity(PAGES);
+
+        for i in 0..PAGES {
+            let ptr = alloc.alloc(1).expect("page allocation should succeed");
+            assert_eq!(page_index(TEST_BASE, ptr), i);
+            ptrs.push(ptr);
+            assert_eq!(alloc.usage(), i + 1);
+        }
+
+        assert!(alloc.alloc(1).is_none());
+
+        let freed = ptrs.remove(4);
+        alloc.dealloc(freed, 1);
+        assert_eq!(alloc.usage(), PAGES - 1);
+
+        let reused = alloc.alloc(1).expect("freed page should be reusable");
+        assert_eq!(reused.addr(), freed.addr());
+        assert_eq!(alloc.usage(), PAGES);
+        ptrs.push(reused);
+
+        for ptr in ptrs {
+            alloc.dealloc(ptr, 1);
+        }
+        assert_eq!(alloc.usage(), 0);
+    }
+
+    #[test]
+    fn test_non_multiple_of_64_multiword_boundary() {
+        const PAGES: usize = 64 + 5;
+        let alloc = make_allocator_pages(PAGES);
+        let mut ptrs = Vec::with_capacity(PAGES);
+
+        for i in 0..PAGES {
+            let ptr = alloc.alloc(1).expect("page allocation should succeed");
+            assert_eq!(page_index(TEST_BASE, ptr), i);
+            ptrs.push(ptr);
+        }
+        assert!(alloc.alloc(1).is_none());
+        assert_eq!(alloc.usage(), PAGES);
+
+        for ptr in ptrs {
+            alloc.dealloc(ptr, 1);
+        }
+        assert_eq!(alloc.usage(), 0);
+        assert!(alloc.alloc(PAGES + 1).is_none());
+
+        let all = alloc.alloc(PAGES).expect("exact pool size should allocate");
+        assert_eq!(all.addr(), TEST_BASE);
+        alloc.dealloc(all, PAGES);
+        assert_eq!(alloc.usage(), 0);
+    }
+
+    #[test]
+    fn test_alloc_contiguous_across_word_boundaries() {
+        const PAGES: usize = 192;
+        let alloc = make_allocator_pages(PAGES);
+
+        let head = alloc.alloc(60).expect("60-page allocation should succeed");
+        assert_eq!(page_index(TEST_BASE, head), 0);
+
+        // Spans word 0 (bits 60..64) and word 1 (bits 0..4).
+        let cross = alloc
+            .alloc(8)
+            .expect("cross-word allocation should succeed");
+        assert_eq!(page_index(TEST_BASE, cross), 60);
+
+        // Spans > 64 pages across word 1 and word 2.
+        let large = alloc
+            .alloc(100)
+            .expect("100-page allocation should succeed");
+        assert_eq!(page_index(TEST_BASE, large), 68);
+        assert_eq!(alloc.usage(), 168);
+
+        assert!(alloc.alloc(25).is_none());
+        let tail = alloc.alloc(24).expect("remaining 24 pages should allocate");
+        assert_eq!(page_index(TEST_BASE, tail), 168);
+        assert_eq!(alloc.usage(), PAGES);
+
+        alloc.dealloc(head, 60);
+        alloc.dealloc(cross, 8);
+        alloc.dealloc(large, 100);
+        alloc.dealloc(tail, 24);
+        assert_eq!(alloc.usage(), 0);
+
+        let whole = alloc.alloc(PAGES).expect("full pool should coalesce");
+        assert_eq!(whole.addr(), TEST_BASE);
+        alloc.dealloc(whole, PAGES);
+    }
+
+    #[test]
+    fn test_fragmentation_and_coalescing() {
+        let alloc = make_allocator_pages(8);
+        let mut ptrs = Vec::with_capacity(8);
+        for _ in 0..8 {
+            ptrs.push(alloc.alloc(1).unwrap());
+        }
+
+        // Free non-adjacent pages so no 2-page contiguous run exists.
+        for idx in [1, 3, 5, 7] {
+            alloc.dealloc(ptrs[idx], 1);
+        }
+        assert_eq!(alloc.usage(), 4);
+        assert!(alloc.alloc(2).is_none());
+
+        // Freeing page 2 coalesces [1..4) into a 3-page run.
+        alloc.dealloc(ptrs[2], 1);
+        assert_eq!(alloc.usage(), 3);
+
+        let coalesced = alloc
+            .alloc(3)
+            .expect("coalesced 3-page run should allocate");
+        assert_eq!(page_index(TEST_BASE, coalesced), 1);
+        assert_eq!(alloc.usage(), 6);
+
+        alloc.dealloc(coalesced, 3);
+        for idx in [0, 4, 6] {
+            alloc.dealloc(ptrs[idx], 1);
+        }
+        assert_eq!(alloc.usage(), 0);
+    }
+
+    #[test]
+    fn test_search_hint_advance_reset_and_fallback() {
+        let alloc = make_allocator_pages(128);
+        let mut word0 = Vec::with_capacity(64);
+        for _ in 0..64 {
+            word0.push(alloc.alloc(1).unwrap());
+        }
+        // Word 0 is full, so search_hint advanced to 1.
+        let word1 = alloc.alloc(60).expect("word 1 should have 60 pages");
+        assert_eq!(page_index(TEST_BASE, word1), 64);
+
+        // Exercises alloc_pages with hint > 0 failing from hint*64 and falling back to 0.
+        assert!(alloc.alloc(8).is_none());
+
+        // Freeing pages in word 0 resets search_hint back to 0 via fetch_min.
+        for ptr in word0.drain(..8) {
+            alloc.dealloc(ptr, 1);
+        }
+        let reused = alloc.alloc(8).expect("freed run in word 0 should allocate");
+        assert_eq!(page_index(TEST_BASE, reused), 0);
+
+        alloc.dealloc(reused, 8);
+        for ptr in word0 {
+            alloc.dealloc(ptr, 1);
+        }
+        alloc.dealloc(word1, 60);
+        assert_eq!(alloc.usage(), 0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_dealloc_below_base_panics() {
+        let alloc = make_allocator_pages(4);
+        alloc.dealloc(ptr::without_provenance_mut(TEST_BASE - PAGE_SIZE), 1);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_dealloc_unaligned_panics() {
+        let alloc = make_allocator_pages(4);
+        alloc.dealloc(ptr::without_provenance_mut(TEST_BASE + 1), 1);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_dealloc_out_of_bounds_panics() {
+        let alloc = make_allocator_pages(4);
+        alloc.dealloc(ptr::without_provenance_mut(TEST_BASE + 3 * PAGE_SIZE), 2);
+    }
+
+    #[test]
+    fn test_concurrent_single_page_alloc_dealloc() {
+        const PAGES: usize = 128;
+        const THREADS: usize = 4;
+        const ROUNDS: usize = 32;
+
+        let alloc = make_allocator_pages(PAGES);
+        let owned: Vec<AtomicU8> = (0..PAGES).map(|_| AtomicU8::new(0)).collect();
+
+        std::thread::scope(|s| {
+            for _ in 0..THREADS {
+                s.spawn(|| {
+                    let mut held = Vec::new();
+                    for round in 0..ROUNDS {
+                        for _ in 0..4 {
+                            if let Some(ptr) = alloc.alloc(1) {
+                                check_and_claim(&owned, TEST_BASE, ptr, 1);
+                                held.push(ptr);
+                            }
+                        }
+                        let drain_count = if round % 2 == 0 {
+                            held.len() / 2
+                        } else {
+                            held.len()
+                        };
+                        for ptr in held.drain(..drain_count) {
+                            release_and_dealloc(&alloc, &owned, TEST_BASE, ptr, 1);
+                        }
+                    }
+                    for ptr in held {
+                        release_and_dealloc(&alloc, &owned, TEST_BASE, ptr, 1);
+                    }
+                });
+            }
+        });
+
+        assert_eq!(alloc.usage(), 0);
+        assert!(owned.iter().all(|slot| slot.load(Ordering::Relaxed) == 0));
+        let whole = alloc
+            .alloc(PAGES)
+            .expect("all pages should be available after concurrent test");
+        alloc.dealloc(whole, PAGES);
+    }
+
+    #[test]
+    fn test_concurrent_mixed_contiguous_alloc_dealloc() {
+        const PAGES: usize = 512;
+        const THREADS: usize = 4;
+        const ROUNDS: usize = 16;
+
+        let alloc = make_allocator_pages(PAGES);
+        let owned: Vec<AtomicU8> = (0..PAGES).map(|_| AtomicU8::new(0)).collect();
+
+        std::thread::scope(|s| {
+            for _ in 0..THREADS {
+                s.spawn(|| {
+                    let mut held = Vec::new();
+                    for _ in 0..ROUNDS {
+                        for count in [1, 2, 5, 65] {
+                            if let Some(ptr) = alloc.alloc(count) {
+                                check_and_claim(&owned, TEST_BASE, ptr, count);
+                                held.push((ptr, count));
+                            }
+                        }
+                        for (ptr, count) in held.drain(..) {
+                            release_and_dealloc(&alloc, &owned, TEST_BASE, ptr, count);
+                        }
+                    }
+                });
+            }
+        });
+
+        assert_eq!(alloc.usage(), 0);
+        assert!(owned.iter().all(|slot| slot.load(Ordering::Relaxed) == 0));
+        let whole = alloc
+            .alloc(PAGES)
+            .expect("all pages should be available after mixed concurrent test");
+        alloc.dealloc(whole, PAGES);
+    }
+}
