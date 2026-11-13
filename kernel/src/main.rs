@@ -9,13 +9,15 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use kernel::clint;
 use kernel::klog;
 use kernel::mem;
+use kernel::page;
 use kernel::plic;
 use kernel::random::{self, get_random_bytes};
-use kernel::symbols::{HEAP_SIZE, HEAP_START};
 use kernel::trap;
 use kernel::uart;
 
+use rost_core::alloc::NUM_SLABS;
 use rost_core::arch;
+use rost_core::consts::PAGE_SIZE;
 use rost_core::virtio;
 use rost_core::virtio::rng;
 
@@ -89,9 +91,13 @@ unsafe fn kinit() -> ! {
 unsafe fn kmain() -> ! {
     info!("Initiating hart: {}", arch::riscv::thread_pointer());
     if arch::riscv::thread_pointer() == 0 {
-        // Setup allocator
+        // Setup allocator by reserving dedicated pages from the page allocator
+        const PAGES_PER_SLAB: usize = 1024;
+        let heap_pages = PAGES_PER_SLAB * NUM_SLABS;
+        let heap_start = page::alloc(heap_pages);
+        assert!(!heap_start.is_null(), "Failed to allocate kernel heap");
         unsafe {
-            kernel::alloc::LockedHeap::init(HEAP_START(), HEAP_SIZE());
+            kernel::alloc::LockedHeap::init(heap_start as usize, heap_pages * PAGE_SIZE);
             trap::enable_interrupts();
         };
 

@@ -64,14 +64,8 @@ pub unsafe fn init() {
     let pgtable = unsafe { &mut *KERNEL_PAGE_TABLE.get() };
 
     let regions = [
-        Region::new(DATA_START(), DATA_END(), Attribute::ReadExecute, "DATA"),
-        //Region::new(
-        //    RODATA_START(),
-        //    RODATA_END(),
-        //    Attribute::ReadExecute,
-        //    "RODATA",
-        //),
         Region::new(TEXT_START(), RODATA_START(), Attribute::ReadExecute, "Text"),
+        Region::new(DATA_START(), DATA_END(), Attribute::ReadWrite, "DATA"),
         Region::new(BSS_START(), BSS_END(), Attribute::ReadWrite, "BSS"),
         Region::new(
             KERNEL_STACK_END(),
@@ -88,7 +82,7 @@ pub unsafe fn init() {
         ),
         Region::new(
             PLIC_BASE,
-            PLIC_BASE + 0x40_000, // QEMU PLIC range
+            PLIC_BASE + 0x400_000, // QEMU PLIC range
             Attribute::ReadWrite,
             "PLIC_BASE",
         ),
