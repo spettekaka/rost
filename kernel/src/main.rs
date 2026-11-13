@@ -56,10 +56,6 @@ unsafe fn kinit() -> ! {
         mstatus::set_mpp(mstatus::MPP::Supervisor);
         mepc::write(kmain as *const () as usize);
 
-        // Disable paging during transition
-        let value = satp::Satp::from_bits(satp::Mode::Bare.into());
-        satp::write(value);
-
         // Handle interupts in supervisor mode
         let value = medeleg::Medeleg::from_bits(medeleg::Medeleg::BITMASK);
         medeleg::write(value);

@@ -1,15 +1,20 @@
+use core::cell::SyncUnsafeCell;
+
 use crate::clint::{CLINT_BASE, CLINT_SIZE};
-use crate::page::{self, Attribute, KERNEL_PAGE_TABLE};
+use crate::page::{self, Attribute, PageTable};
 use crate::plic::PLIC_BASE;
 use crate::symbols::*;
 use crate::uart;
 
 use rost_core::arch;
+use rost_core::consts::PAGE_SIZE;
 use rost_core::virtio::{VIRTIO_MMIO_BASE, VIRTIO_MMIO_STRIDE, VIRTIO_SLOTS};
 
 use log::info;
 
 use core::arch::asm;
+
+static KERNEL_PAGE_TABLE: SyncUnsafeCell<PageTable> = SyncUnsafeCell::new(PageTable::new());
 
 pub struct Region {
     start: usize,
@@ -74,16 +79,16 @@ pub unsafe fn init() {
             Attribute::ReadWrite,
             "KERNEL_STACK",
         ),
-        // Region::new(HEAP_START(), HEAP_END(), Attribute::ReadWrite, "Heap"),
+        Region::new(HEAP_START(), HEAP_END(), Attribute::ReadWrite, "Heap"),
         Region::new(
             uart::UART_BASE_ADDR,
-            uart::UART_BASE_ADDR,
+            uart::UART_BASE_ADDR + PAGE_SIZE,
             Attribute::ReadWrite,
             "Uart",
         ),
         Region::new(
             PLIC_BASE,
-            PLIC_BASE + 0x8_000, // NCPUS * 2 * 1000
+            PLIC_BASE + 0x40_000, // QEMU PLIC range
             Attribute::ReadWrite,
             "PLIC_BASE",
         ),

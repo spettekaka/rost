@@ -2,20 +2,16 @@ use crate::mem::Region;
 use crate::symbols::{HEAP_SIZE, HEAP_START};
 use crate::{print, println};
 
+use rost_core::atomic_bitmap::AtomicPageAllocator;
 use rost_core::consts::{PAGE_ORDER, PAGE_SIZE};
 
-use core::cell::SyncUnsafeCell;
-use core::mem::size_of;
 use core::ptr::null_mut;
 
 use log::{info, warn};
 
 const PAGE_TABLE_ENTRIES: usize = 512;
 
-static mut PAGES: usize = 0;
-static mut PAGE_ALLOC_START: usize = 0;
-
-pub static KERNEL_PAGE_TABLE: SyncUnsafeCell<PageTable> = SyncUnsafeCell::new(PageTable::new());
+static PAGE_ALLOCATOR: AtomicPageAllocator = AtomicPageAllocator::new();
 
 unsafe extern "C" {
     static _sheap: u8;
@@ -38,41 +34,14 @@ pub const fn align_page_down(val: usize) -> usize {
 
 pub fn init() {
     info!("Initiating paging");
-    unsafe {
-        PAGES = HEAP_SIZE() / PAGE_SIZE;
-        let ptr = HEAP_START() as *mut Page;
-
-        for i in 0..PAGES {
-            (*ptr.add(i)).clear();
-        }
-
-        PAGE_ALLOC_START = align_val(HEAP_START() + PAGES * size_of::<Page>(), PAGE_ORDER);
-    }
+    PAGE_ALLOCATOR.init(HEAP_START(), HEAP_START() + HEAP_SIZE());
 }
 
 pub fn alloc(pages: usize) -> *mut u8 {
-    assert!(pages > 0);
-    unsafe {
-        let ptr = PAGE_ALLOC_START as *mut Page;
-        for i in 0..PAGES - pages {
-            if !(*ptr.add(i)).is_free() {
-                continue;
-            }
-
-            let slice = core::slice::from_raw_parts_mut(ptr.add(i), pages);
-
-            if !slice.iter().all(|page| page.is_free()) {
-                continue;
-            }
-
-            slice.iter_mut().for_each(|page| page.set(PageFlag::Taken));
-            slice[pages - 1].set(PageFlag::Last);
-
-            return (PAGE_ALLOC_START + PAGE_SIZE * i) as *mut u8;
-        }
-    }
-    warn!("alloc: ptr is NULL");
-    null_mut()
+    PAGE_ALLOCATOR.alloc(pages).unwrap_or_else(|| {
+        warn!("alloc: out of memory");
+        null_mut()
+    })
 }
 
 pub fn zalloc(pages: usize) -> *mut u8 {
@@ -85,76 +54,8 @@ pub fn zalloc(pages: usize) -> *mut u8 {
     ptr
 }
 
-pub fn dealloc(ptr: *mut u8) {
-    assert!(!ptr.is_null());
-
-    unsafe {
-        let addr = HEAP_START() + (ptr as usize - PAGE_ALLOC_START) / PAGE_SIZE;
-        assert!(addr >= HEAP_START() && addr < PAGE_ALLOC_START);
-        let mut p = addr as *mut Page;
-        assert!(!(*p).is_free());
-        while !(*p).is_free() && !(*p).is_last() {
-            (*p).clear();
-            p = p.add(1);
-        }
-
-        assert!((*p).is_last());
-        (*p).clear();
-    }
-}
-
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub enum PageFlag {
-    Empty = 0,
-    Taken = 1 << 0,
-    Last = 1 << 1,
-}
-
-impl PageFlag {
-    pub const fn value(self) -> u8 {
-        self as u8
-    }
-}
-
-#[repr(C)]
-#[repr(align(4096))]
-pub struct Page {
-    pub flag: u8,
-}
-
-impl Default for Page {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Page {
-    pub fn new() -> Self {
-        Self {
-            flag: PageFlag::Empty.value(),
-        }
-    }
-
-    pub fn clear(&mut self) {
-        self.flag = PageFlag::Empty.value();
-    }
-
-    pub fn clear_flag(&mut self, flag: PageFlag) {
-        self.flag &= !flag.value();
-    }
-
-    pub fn set(&mut self, flag: PageFlag) {
-        self.flag |= flag.value();
-    }
-
-    pub const fn is_last(&self) -> bool {
-        self.flag & PageFlag::Last.value() != 0
-    }
-
-    pub const fn is_free(&self) -> bool {
-        self.flag & PageFlag::Taken.value() == 0
-    }
+pub fn dealloc(ptr: *mut u8, pages: usize) {
+    PAGE_ALLOCATOR.dealloc(ptr, pages);
 }
 
 #[repr(C)]
@@ -396,7 +297,7 @@ impl PageTable {
 
     pub fn mark(&mut self, start: usize, end: usize, flags: usize) {
         let mut memaddr = align_val(start, PAGE_ORDER);
-        let mut start = unsafe { start & !(PAGE_ALLOC_START - 1) };
+        let mut start = align_page_down(start);
 
         let pages = (align_val(end, 12) - memaddr) / PAGE_ORDER;
 
@@ -485,10 +386,10 @@ impl PageTable {
                 for lv1 in table_lv1.entries.iter().take(PageTable::len()) {
                     if lv1.valid() && lv1.is_branch() {
                         let memaddr_lv0 = (lv1.get_entry() & !0x3ff) << 2;
-                        dealloc(memaddr_lv0 as *mut u8);
+                        dealloc(memaddr_lv0 as *mut u8, 1);
                     }
                 }
-                dealloc(memaddr_lv1 as *mut u8);
+                dealloc(memaddr_lv1 as *mut u8, 1);
             }
         }
     }

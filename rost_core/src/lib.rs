@@ -3,6 +3,7 @@
 
 pub mod alloc;
 pub mod arch;
+pub mod atomic_bitmap;
 pub mod consts;
 pub mod rand;
 pub mod random;
