@@ -4,7 +4,7 @@ use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use crate::consts::{PAGE_ORDER, PAGE_SIZE};
 
 pub const MAX_PAGES: usize = 65_536; // 256 MiB
-const BITMAP_WORDS: usize = (MAX_PAGES + 63) / 64;
+const BITMAP_WORDS: usize = MAX_PAGES.div_ceil(64);
 
 /// Atomic page allocator
 ///
@@ -25,10 +25,9 @@ impl Default for AtomicPageAllocator {
 
 impl AtomicPageAllocator {
     pub const fn new() -> Self {
-        const ZERO_WORD: AtomicU64 = AtomicU64::new(0);
         Self {
             base_addr: AtomicUsize::new(0),
-            bitmap: [ZERO_WORD; BITMAP_WORDS],
+            bitmap: [const { AtomicU64::new(0) }; BITMAP_WORDS],
             search_hint: AtomicUsize::new(0),
             total_pages: AtomicUsize::new(0),
             used_pages: AtomicUsize::new(0),
@@ -124,7 +123,7 @@ impl AtomicPageAllocator {
         let total = self.total_pages.load(Ordering::Relaxed);
         let used = self.used_pages.load(Ordering::Relaxed);
 
-        if pages > total || pages > (total - used) {
+        if pages > total || pages > total.saturating_sub(used) {
             return None;
         }
 
@@ -261,7 +260,7 @@ impl AtomicPageAllocator {
 
         let base = self.base_addr.load(Ordering::Relaxed);
         let addr = ptr as usize;
-        assert!(addr >= base && (addr - base) % PAGE_SIZE == 0);
+        assert!(addr >= base && (addr - base).is_multiple_of(PAGE_SIZE));
 
         let start_page = (addr - base) >> PAGE_ORDER;
         assert!(start_page + pages <= self.total_pages.load(Ordering::Relaxed));
