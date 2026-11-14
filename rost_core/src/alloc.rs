@@ -45,7 +45,7 @@ impl<'a> Heap<'a> {
                 .page_allocator
                 .alloc(PAGES_PER_SLAB)
                 .ok_or(AllocError)?;
-            unsafe { slab.grow(ptr.addr(), PAGES_PER_SLAB * PAGE_SIZE) };
+            unsafe { slab.grow(ptr, PAGES_PER_SLAB * PAGE_SIZE) };
         }
         Ok(())
     }

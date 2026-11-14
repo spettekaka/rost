@@ -1,5 +1,5 @@
 use core::alloc::{AllocError, Layout};
-use core::ptr::{self, NonNull};
+use core::ptr::NonNull;
 
 pub struct Slab {
     capacity: usize,
@@ -25,14 +25,12 @@ struct FreeBlock {
 impl Slab {
     /// # Safety
     ///
-    /// The addresses are guranteed by the caller to be correct
-    pub unsafe fn init(start_addr: usize, slab_size: usize, block_size: usize) -> Self {
-        let n_blocks = slab_size / block_size;
-        Self {
-            capacity: n_blocks,
-            size: block_size,
-            free_list: unsafe { FreeList::new(start_addr, n_blocks, block_size) },
-        }
+    /// `base` must be non-null, aligned to `block_size`, and valid for writes across
+    /// `slab_size` bytes.
+    pub unsafe fn init(base: *mut u8, slab_size: usize, block_size: usize) -> Self {
+        let mut slab = Self::new(block_size);
+        unsafe { slab.grow(base, slab_size) };
+        slab
     }
 
     /// Create a new empty slab
@@ -46,12 +44,12 @@ impl Slab {
 
     /// # Safety
     ///
-    /// The addresses are guranteed by the caller to be correct
-    /// The range `[addr ... addr + bytes)` must be valid and page aligned
-    pub unsafe fn grow(&mut self, addr: usize, bytes: usize) {
+    /// `base` must be non-null, aligned to `self.size`, and valid for writes across
+    /// `bytes` bytes.
+    pub unsafe fn grow(&mut self, base: *mut u8, bytes: usize) {
         let blocks = bytes / self.size;
         for i in (0..blocks).rev() {
-            let ptr = ptr::with_exposed_provenance_mut::<FreeBlock>(addr + i * self.size);
+            let ptr = unsafe { base.add(i * self.size) }.cast::<FreeBlock>();
             let block = NonNull::new(ptr).expect("slab block address cannot be null");
             unsafe {
                 self.free_list.push(block);
@@ -88,17 +86,6 @@ impl Slab {
 }
 
 impl FreeList {
-    unsafe fn new(start_addr: usize, blocks: usize, block_size: usize) -> Self {
-        let mut free_list = Self { len: 0, head: None };
-
-        for i in (0..blocks).rev() {
-            let ptr = ptr::with_exposed_provenance_mut::<FreeBlock>(start_addr + i * block_size);
-            let block = NonNull::new(ptr).expect("slab block address cannot be null");
-            unsafe { free_list.push(block) };
-        }
-        free_list
-    }
-
     unsafe fn push(&mut self, block: NonNull<FreeBlock>) {
         unsafe {
             block.as_ptr().write(FreeBlock {
@@ -144,8 +131,12 @@ mod tests {
             Self { ptr, layout }
         }
 
+        fn as_ptr(&self) -> *mut u8 {
+            self.ptr
+        }
+
         fn start_addr(&self) -> usize {
-            self.ptr.expose_provenance()
+            self.ptr.addr()
         }
     }
 
@@ -160,7 +151,7 @@ mod tests {
     #[test]
     fn test_init() {
         let mem = SlabMemoryGuard::new(SLAB_SIZE, BLOCK_SIZE);
-        let slab = unsafe { Slab::init(mem.start_addr(), SLAB_SIZE, BLOCK_SIZE) };
+        let slab = unsafe { Slab::init(mem.as_ptr(), SLAB_SIZE, BLOCK_SIZE) };
 
         assert_eq!(slab.capacity(), NUM_BLOCKS);
         assert_eq!(slab.size(), BLOCK_SIZE);
@@ -170,7 +161,7 @@ mod tests {
     #[test]
     fn test_non_multiple_slab_size() {
         let mem = SlabMemoryGuard::new(100, BLOCK_SIZE);
-        let slab = unsafe { Slab::init(mem.start_addr(), 100, BLOCK_SIZE) };
+        let slab = unsafe { Slab::init(mem.as_ptr(), 100, BLOCK_SIZE) };
 
         assert_eq!(slab.capacity(), 1);
         assert_eq!(slab.size(), BLOCK_SIZE);
@@ -181,7 +172,7 @@ mod tests {
     fn test_allocate_and_deallocate_single() {
         let mem = SlabMemoryGuard::new(SLAB_SIZE, BLOCK_SIZE);
         let start = mem.start_addr();
-        let mut slab = unsafe { Slab::init(start, SLAB_SIZE, BLOCK_SIZE) };
+        let mut slab = unsafe { Slab::init(mem.as_ptr(), SLAB_SIZE, BLOCK_SIZE) };
         let layout = Layout::from_size_align(BLOCK_SIZE, BLOCK_SIZE).unwrap();
 
         let ptr = slab.allocate(layout).expect("allocation should succeed");
@@ -204,7 +195,7 @@ mod tests {
     fn test_exhaust_and_reuse() {
         let mem = SlabMemoryGuard::new(SLAB_SIZE, BLOCK_SIZE);
         let start = mem.start_addr();
-        let mut slab = unsafe { Slab::init(start, SLAB_SIZE, BLOCK_SIZE) };
+        let mut slab = unsafe { Slab::init(mem.as_ptr(), SLAB_SIZE, BLOCK_SIZE) };
         let layout = Layout::from_size_align(BLOCK_SIZE, BLOCK_SIZE).unwrap();
 
         let mut ptrs = Vec::with_capacity(NUM_BLOCKS);
@@ -246,5 +237,36 @@ mod tests {
         }
         assert_eq!(slab.usage(), NUM_BLOCKS);
         assert!(slab.allocate(layout).is_err());
+    }
+
+    #[test]
+    fn test_new_and_grow() {
+        let mut slab = Slab::new(BLOCK_SIZE);
+        let layout = Layout::from_size_align(BLOCK_SIZE, BLOCK_SIZE).unwrap();
+        assert_eq!(slab.capacity(), 0);
+        assert!(slab.allocate(layout).is_err());
+
+        let mem1 = SlabMemoryGuard::new(SLAB_SIZE, BLOCK_SIZE);
+        let mem2 = SlabMemoryGuard::new(SLAB_SIZE, BLOCK_SIZE);
+        unsafe {
+            slab.grow(mem1.as_ptr(), SLAB_SIZE);
+            slab.grow(mem2.as_ptr(), SLAB_SIZE);
+        }
+        assert_eq!(slab.capacity(), NUM_BLOCKS * 2);
+
+        let mut ptrs = Vec::with_capacity(NUM_BLOCKS * 2);
+        for _ in 0..(NUM_BLOCKS * 2) {
+            let ptr = slab.allocate(layout).expect("allocation should succeed");
+            unsafe {
+                ptr.write_bytes(0xCC, BLOCK_SIZE);
+            }
+            ptrs.push(ptr);
+        }
+        assert!(slab.allocate(layout).is_err());
+
+        for ptr in ptrs {
+            slab.deallocate(ptr);
+        }
+        assert_eq!(slab.usage(), 0);
     }
 }
