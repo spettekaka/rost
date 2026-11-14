@@ -1,10 +1,11 @@
 use core::alloc::{AllocError, Layout};
 
-use crate::slab::Slab;
+use crate::{atomic_bitmap::AtomicPageAllocator, consts::PAGE_SIZE, slab::Slab};
 
-pub const NUM_SLABS: usize = 7;
+pub const NUM_SLABS: usize = 6;
 pub const MIN_SLAB_SIZE: usize = 4096;
 pub const MIN_HEAP_SIZE: usize = MIN_SLAB_SIZE * NUM_SLABS;
+const PAGES_PER_SLAB: usize = 1024;
 
 pub enum HeapAllocator {
     Slab64,
@@ -13,68 +14,77 @@ pub enum HeapAllocator {
     Slab512,
     Slab1024,
     Slab2048,
-    Slab4096,
 }
 
-pub struct Heap {
+pub struct Heap<'a> {
+    page_allocator: &'a AtomicPageAllocator,
     slabs: [Slab; NUM_SLABS],
 }
 
-impl Heap {
+impl<'a> Heap<'a> {
     /// # Safety
     ///
     /// The addresses are guaranteed to be correct by thec caller
-    pub unsafe fn new(start_addr: usize, heap_size: usize) -> Self {
-        let slab_size = heap_size / NUM_SLABS;
-        unsafe {
-            Self {
-                slabs: [
-                    Slab::init(start_addr, slab_size, 64),
-                    Slab::init(start_addr + slab_size, slab_size, 128),
-                    Slab::init(start_addr + slab_size * 2, slab_size, 256),
-                    Slab::init(start_addr + slab_size * 3, slab_size, 512),
-                    Slab::init(start_addr + slab_size * 4, slab_size, 1024),
-                    Slab::init(start_addr + slab_size * 5, slab_size, 2048),
-                    Slab::init(start_addr + slab_size * 6, slab_size, 4096),
-                ],
-            }
+    pub unsafe fn new(page_allocator: &'a AtomicPageAllocator) -> Self {
+        Self {
+            page_allocator,
+            slabs: [
+                Slab::new(64),
+                Slab::new(128),
+                Slab::new(256),
+                Slab::new(512),
+                Slab::new(1024),
+                Slab::new(2048),
+            ],
         }
+    }
+
+    pub fn init(&mut self) -> Result<(), AllocError> {
+        for slab in self.slabs.iter_mut() {
+            let ptr = self
+                .page_allocator
+                .alloc(PAGES_PER_SLAB)
+                .ok_or(AllocError)?;
+            unsafe { slab.grow(ptr.addr(), PAGES_PER_SLAB * PAGE_SIZE) };
+        }
+        Ok(())
     }
 
     pub fn allocate(&mut self, layout: Layout) -> Result<*mut u8, AllocError> {
-        match Self::layout_to_allocator(layout) {
-            HeapAllocator::Slab64 => self.slabs[0].allocate(layout),
-            HeapAllocator::Slab128 => self.slabs[1].allocate(layout),
-            HeapAllocator::Slab256 => self.slabs[2].allocate(layout),
-            HeapAllocator::Slab512 => self.slabs[3].allocate(layout),
-            HeapAllocator::Slab1024 => self.slabs[4].allocate(layout),
-            HeapAllocator::Slab2048 => self.slabs[5].allocate(layout),
-            HeapAllocator::Slab4096 => self.slabs[6].allocate(layout),
+        let effective_size = layout.size().max(layout.align());
+        if let Some(allocator) = Self::layout_to_allocator(effective_size)
+            && let Ok(ptr) = self.slabs[allocator as usize].allocate(layout)
+        {
+            return Ok(ptr);
+        }
+
+        if layout.align() > PAGE_SIZE {
+            return Err(AllocError);
+        }
+
+        let pages = layout.size().div_ceil(PAGE_SIZE).max(1);
+        self.page_allocator.alloc(pages).ok_or(AllocError)
+    }
+
+    pub fn deallocate(&mut self, ptr: *mut u8, layout: Layout) {
+        let effective_size = layout.size().max(layout.align());
+        if let Some(allocator) = Self::layout_to_allocator(effective_size) {
+            self.slabs[allocator as usize].deallocate(ptr);
+        } else {
+            let pages = layout.size().div_ceil(PAGE_SIZE).max(1);
+            self.page_allocator.dealloc(ptr, pages)
         }
     }
 
-    pub fn deallocate(&mut self, block: *mut u8, layout: Layout) {
-        match Self::layout_to_allocator(layout) {
-            HeapAllocator::Slab64 => self.slabs[0].deallocate(block),
-            HeapAllocator::Slab128 => self.slabs[1].deallocate(block),
-            HeapAllocator::Slab256 => self.slabs[2].deallocate(block),
-            HeapAllocator::Slab512 => self.slabs[3].deallocate(block),
-            HeapAllocator::Slab1024 => self.slabs[4].deallocate(block),
-            HeapAllocator::Slab2048 => self.slabs[5].deallocate(block),
-            HeapAllocator::Slab4096 => self.slabs[6].deallocate(block),
-        }
-    }
-
-    fn layout_to_allocator(layout: Layout) -> HeapAllocator {
-        match layout.size() {
-            x if x <= 64 => HeapAllocator::Slab64,
-            x if x <= 128 => HeapAllocator::Slab128,
-            x if x <= 256 => HeapAllocator::Slab256,
-            x if x <= 512 => HeapAllocator::Slab512,
-            x if x <= 1024 => HeapAllocator::Slab1024,
-            x if x <= 2048 => HeapAllocator::Slab2048,
-            x if x <= 4096 => HeapAllocator::Slab4096,
-            _ => unreachable!(),
+    fn layout_to_allocator(size: usize) -> Option<HeapAllocator> {
+        match size {
+            x if x <= 64 => Some(HeapAllocator::Slab64),
+            x if x <= 128 => Some(HeapAllocator::Slab128),
+            x if x <= 256 => Some(HeapAllocator::Slab256),
+            x if x <= 512 => Some(HeapAllocator::Slab512),
+            x if x <= 1024 => Some(HeapAllocator::Slab1024),
+            x if x <= 2048 => Some(HeapAllocator::Slab2048),
+            _ => None,
         }
     }
 }

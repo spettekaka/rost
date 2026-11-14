@@ -19,6 +19,10 @@ unsafe extern "C" {
     static _heap_size: u8;
 }
 
+pub fn allocator() -> &'static AtomicPageAllocator {
+    &PAGE_ALLOCATOR
+}
+
 pub const fn align_val(val: usize, order: usize) -> usize {
     let o = (1usize << order) - 1;
     (val + o) & !o

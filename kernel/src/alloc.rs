@@ -7,15 +7,17 @@ use rost_core::sync::spinlock::Mutex;
 
 use log::info;
 
-pub struct LockedHeap(Mutex<Option<Heap>>);
+use crate::page;
 
-impl Default for LockedHeap {
+pub struct LockedHeap<'a>(Mutex<Option<Heap<'a>>>);
+
+impl<'a> Default for LockedHeap<'a> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl LockedHeap {
+impl<'a> LockedHeap<'a> {
     pub const fn new() -> Self {
         Self(Mutex::new(None))
     }
@@ -30,20 +32,20 @@ impl LockedHeap {
         );
 
         unsafe {
-            *ALLOCATOR.0.lock().unwrap() = Some(Heap::new(start_addr, size));
+            *ALLOCATOR.0.lock().unwrap() = Some(Heap::new(page::allocator()));
         }
     }
 }
 
-impl Deref for LockedHeap {
-    type Target = Mutex<Option<Heap>>;
+impl<'a> Deref for LockedHeap<'a> {
+    type Target = Mutex<Option<Heap<'a>>>;
 
-    fn deref(&self) -> &Mutex<Option<Heap>> {
+    fn deref(&self) -> &Mutex<Option<Heap<'a>>> {
         &self.0
     }
 }
 
-unsafe impl GlobalAlloc for LockedHeap {
+unsafe impl<'a> GlobalAlloc for LockedHeap<'a> {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         if let Some(ref mut heap) = *self.0.lock().unwrap() {
             match heap.allocate(layout) {

@@ -35,6 +35,31 @@ impl Slab {
         }
     }
 
+    /// Create a new empty slab
+    pub const fn new(block_size: usize) -> Self {
+        Self {
+            capacity: 0,
+            size: block_size,
+            free_list: FreeList { len: 0, head: None },
+        }
+    }
+
+    /// # Safety
+    ///
+    /// The addresses are guranteed by the caller to be correct
+    /// The range `[addr ... addr + bytes)` must be valid and page aligned
+    pub unsafe fn grow(&mut self, addr: usize, bytes: usize) {
+        let blocks = bytes / self.size;
+        for i in (0..blocks).rev() {
+            let ptr = ptr::with_exposed_provenance_mut::<FreeBlock>(addr + i * self.size);
+            let block = NonNull::new(ptr).expect("slab block address cannot be null");
+            unsafe {
+                self.free_list.push(block);
+            }
+        }
+        self.capacity += blocks;
+    }
+
     pub fn capacity(&self) -> usize {
         self.capacity
     }
