@@ -10,14 +10,16 @@ use core::ptr::null_mut;
 use log::{info, warn};
 
 const PAGE_TABLE_ENTRIES: usize = 512;
+const PTE_PPN_MASK: usize = 0x003f_ffff_ffff_fc00; // Sv39 PTE bits 53..10
+const PTE_FLAG_MASK: usize = 0x3ff;
+
+const LEVEL_SIZES: [usize; 3] = [
+    1 << 12, // level 0: 4 KiB
+    1 << 21, // level 1: 2 MiB megapage
+    1 << 30, // level 2: 1 GiB gigapage
+];
 
 static PAGE_ALLOCATOR: AtomicPageAllocator = AtomicPageAllocator::new();
-
-unsafe extern "C" {
-    static _sheap: u8;
-    static _eheap: u8;
-    static _heap_size: u8;
-}
 
 pub fn allocator() -> &'static AtomicPageAllocator {
     &PAGE_ALLOCATOR
@@ -53,13 +55,115 @@ pub fn zalloc(pages: usize) -> *mut u8 {
     if !ptr.is_null() {
         let len = (PAGE_SIZE * pages) / 8;
         let slice = unsafe { core::slice::from_raw_parts_mut(ptr as *mut u64, len) };
-        slice.iter_mut().for_each(|ptr| *ptr = 0);
+        slice.iter_mut().for_each(|word| *word = 0);
     }
     ptr
 }
 
 pub fn dealloc(ptr: *mut u8, pages: usize) {
     PAGE_ALLOCATOR.dealloc(ptr, pages);
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum PageError {
+    OutOfMemory,
+    UnalignedAddress,
+    InvalidFlags,
+    UserPageInKernelTable,
+    SuperpageConflict,
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
+#[repr(transparent)]
+pub struct VirtAddr(pub usize);
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
+#[repr(transparent)]
+pub struct PhysAddr(pub usize);
+
+impl VirtAddr {
+    #[inline]
+    pub const fn vpn(self, level: usize) -> usize {
+        (self.0 >> (PAGE_ORDER + 9 * level)) & 0x1ff
+    }
+
+    #[inline]
+    pub const fn offset(self, level: usize) -> usize {
+        let mask = (1usize << (PAGE_ORDER + 9 * level)) - 1;
+        self.0 & mask
+    }
+
+    #[inline]
+    pub const fn is_aligned_to_level(self, level: usize) -> bool {
+        self.offset(level) == 0
+    }
+}
+
+impl PhysAddr {
+    #[inline]
+    pub const fn is_aligned_to_level(self, level: usize) -> bool {
+        let mask = (1usize << (PAGE_ORDER + 9 * level)) - 1;
+        (self.0 & mask) == 0
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+#[repr(transparent)]
+pub struct PteFlags(pub usize);
+
+impl PteFlags {
+    pub const VALID: Self = Self(1 << 0);
+    pub const READ: Self = Self(1 << 1);
+    pub const WRITE: Self = Self(1 << 2);
+    pub const EXECUTE: Self = Self(1 << 3);
+    pub const USER: Self = Self(1 << 4);
+    pub const GLOBAL: Self = Self(1 << 5);
+    pub const ACCESSED: Self = Self(1 << 6);
+    pub const DIRTY: Self = Self(1 << 7);
+
+    // Kernel presets include V, G, A (and D when writable) for Sv39 compliance.
+    pub const KERNEL_RO: Self =
+        Self(Self::VALID.0 | Self::READ.0 | Self::GLOBAL.0 | Self::ACCESSED.0);
+    pub const KERNEL_RW: Self = Self(
+        Self::VALID.0
+            | Self::READ.0
+            | Self::WRITE.0
+            | Self::GLOBAL.0
+            | Self::ACCESSED.0
+            | Self::DIRTY.0,
+    );
+    pub const KERNEL_RX: Self =
+        Self(Self::VALID.0 | Self::READ.0 | Self::EXECUTE.0 | Self::GLOBAL.0 | Self::ACCESSED.0);
+    pub const MMIO: Self = Self::KERNEL_RW;
+
+    pub const USER_RO: Self = Self(Self::VALID.0 | Self::USER.0 | Self::READ.0 | Self::ACCESSED.0);
+    pub const USER_RW: Self = Self(
+        Self::VALID.0
+            | Self::USER.0
+            | Self::READ.0
+            | Self::WRITE.0
+            | Self::ACCESSED.0
+            | Self::DIRTY.0,
+    );
+    pub const USER_RX: Self =
+        Self(Self::VALID.0 | Self::USER.0 | Self::READ.0 | Self::EXECUTE.0 | Self::ACCESSED.0);
+
+    #[inline]
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    #[inline]
+    pub const fn contains(self, other: Self) -> bool {
+        (self.0 & other.0) == other.0
+    }
+
+    /// Sv39 reserves leaf PTEs with W=1 and R=0.
+    #[inline]
+    pub const fn is_valid_leaf(self) -> bool {
+        let rwx = self.0 & (Self::READ.0 | Self::WRITE.0 | Self::EXECUTE.0);
+        rwx != 0 && !(self.contains(Self::WRITE) && !self.contains(Self::READ))
+    }
 }
 
 #[repr(C)]
@@ -72,133 +176,68 @@ pub struct PageTable {
 #[repr(transparent)]
 pub struct Entry(usize);
 
-/* Virtual Page Number */
-#[derive(Debug, Copy, Clone)]
-#[repr(transparent)]
-pub struct VPN(usize);
-
-/* Physical Page Number */
-#[derive(Debug, Copy, Clone)]
-#[repr(transparent)]
-pub struct PPN(usize);
-
-#[derive(Debug, Copy, Clone)]
-pub enum Attribute {
-    Dirty = 1 << 7,
-    Accessed = 1 << 6,
-    Global = 1 << 5,
-    User = 1 << 4,
-    Execute = 1 << 3,
-    Write = 1 << 2,
-    Read = 1 << 1,
-    Valid = 1 << 0,
-    ReadWrite = 0b11 << 1,
-    ReadExecute = 0b101 << 1,
-    UserRead = 0b10010,
-    UserReadWrite = 0b10110,
-    UserReadExecute = 0b11010,
-    MMIO = 0b11000111,
-}
-
 impl Entry {
-    pub const fn new(ppn: usize, flags: usize) -> Self {
-        Self(((ppn & !0xfff) >> 2) | flags)
+    pub const fn new(paddr: PhysAddr, flags: PteFlags) -> Self {
+        Self(((paddr.0 >> 2) & PTE_PPN_MASK) | (flags.0 & PTE_FLAG_MASK))
     }
 
-    pub const fn dirty(&self) -> bool {
-        self.0 & Attribute::Dirty as usize != 0
+    pub const fn dirty(self) -> bool {
+        self.flags().contains(PteFlags::DIRTY)
     }
 
-    pub const fn accessed(&self) -> bool {
-        self.0 & Attribute::Accessed as usize != 0
+    pub const fn accessed(self) -> bool {
+        self.flags().contains(PteFlags::ACCESSED)
     }
 
-    pub const fn global(&self) -> bool {
-        self.0 & Attribute::Global as usize != 0
+    pub const fn global(self) -> bool {
+        self.flags().contains(PteFlags::GLOBAL)
     }
 
-    pub const fn user(&self) -> bool {
-        self.0 & Attribute::User as usize != 0
+    pub const fn user(self) -> bool {
+        self.flags().contains(PteFlags::USER)
     }
 
-    pub const fn executable(&self) -> bool {
-        self.0 & Attribute::Execute as usize != 0
+    pub const fn executable(self) -> bool {
+        self.flags().contains(PteFlags::EXECUTE)
     }
 
-    pub const fn writable(&self) -> bool {
-        self.0 & Attribute::Write as usize != 0
+    pub const fn writable(self) -> bool {
+        self.flags().contains(PteFlags::WRITE)
     }
 
-    pub const fn readable(&self) -> bool {
-        self.0 & Attribute::Read as usize != 0
+    pub const fn readable(self) -> bool {
+        self.flags().contains(PteFlags::READ)
     }
 
-    pub const fn valid(&self) -> bool {
-        self.0 & Attribute::Valid as usize != 0
+    pub const fn valid(self) -> bool {
+        self.flags().contains(PteFlags::VALID)
     }
 
-    pub const fn is_leaf(&self) -> bool {
+    pub const fn is_leaf(self) -> bool {
         self.0 & 0xe != 0
     }
 
-    pub const fn is_branch(&self) -> bool {
+    pub const fn is_branch(self) -> bool {
         !self.is_leaf()
     }
 
-    pub const fn physical_addr(&self) -> PPN {
-        PPN((self.0 & !0x3ff) << 2)
+    pub const fn physical_addr(self) -> PhysAddr {
+        PhysAddr((self.0 & PTE_PPN_MASK) << 2)
     }
 
-    pub const fn flags(&self) -> usize {
-        self.0 & 0x3ff
+    pub const fn flags(self) -> PteFlags {
+        PteFlags(self.0 & PTE_FLAG_MASK)
     }
 
-    pub const fn get_entry(&self) -> usize {
+    pub const fn get_entry(self) -> usize {
         self.0
     }
 }
 
-impl VPN {
-    pub const fn vpn0(&self) -> usize {
-        (self.0 >> 12) & 0x1ff
-    }
-    pub const fn vpn1(&self) -> usize {
-        (self.0 >> 21) & 0x1ff
-    }
-    pub const fn vpn2(&self) -> usize {
-        (self.0 >> 30) & 0x1ff
-    }
-    pub fn index(&self, id: usize) -> usize {
-        match id {
-            0 => self.vpn0(),
-            1 => self.vpn1(),
-            2 => self.vpn2(),
-            _ => unreachable!(),
-        }
-    }
-}
-
-impl PPN {
-    pub const fn ppn0(&self) -> usize {
-        (self.0 >> 12) & 0x1ff
-    }
-
-    pub const fn ppn1(&self) -> usize {
-        (self.0 >> 21) & 0x1ff
-    }
-
-    pub const fn ppn2(&self) -> usize {
-        (self.0 >> 30) & 0x3ff_ffff
-    }
-
-    pub fn index(&self, id: usize) -> usize {
-        match id {
-            0 => self.ppn0(),
-            1 => self.ppn1(),
-            2 => self.ppn2(),
-            _ => unreachable!(),
-        }
-    }
+#[inline]
+const fn phys_to_virt(paddr: PhysAddr) -> *mut PageTable {
+    // Identity-mapped for now; update here if moving to a higher-half direct map.
+    paddr.0 as *mut PageTable
 }
 
 impl Default for PageTable {
@@ -218,53 +257,131 @@ impl PageTable {
         PAGE_TABLE_ENTRIES
     }
 
-    pub fn kernel_map(&mut self, vaddr: usize, paddr: usize, flags: usize) {
-        if flags & Attribute::User as usize != 0 {
-            panic!("Trying to map user page to kernel page table");
+    pub fn kernel_map(
+        &mut self,
+        vaddr: VirtAddr,
+        paddr: PhysAddr,
+        flags: PteFlags,
+    ) -> Result<(), PageError> {
+        if flags.contains(PteFlags::USER) {
+            return Err(PageError::UserPageInKernelTable);
         }
-        self.map_addr(vaddr, paddr, flags, 0);
+        self.map_addr(vaddr, paddr, flags.union(PteFlags::GLOBAL), 0)
     }
 
-    fn map_addr(&mut self, vaddr: usize, paddr: usize, flags: usize, level: usize) {
-        assert!(
-            paddr.is_multiple_of(PAGE_SIZE),
-            "physical address {:x} not aligned",
-            paddr
-        );
-        assert!(
-            vaddr.is_multiple_of(PAGE_SIZE),
-            "virtual address {:x} not aligned",
-            paddr
-        );
+    pub fn map_addr(
+        &mut self,
+        vaddr: VirtAddr,
+        paddr: PhysAddr,
+        flags: PteFlags,
+        level: usize,
+    ) -> Result<(), PageError> {
+        self.map_addr_inner(vaddr, paddr, flags, level, false)
+    }
 
-        let vpn = VPN(vaddr);
-        let mut v = &mut self.entries[vpn.vpn2()];
-        for lvl in (level..2).rev() {
-            if !v.valid() {
+    fn map_addr_inner(
+        &mut self,
+        vaddr: VirtAddr,
+        paddr: PhysAddr,
+        flags: PteFlags,
+        level: usize,
+        merge_existing: bool,
+    ) -> Result<(), PageError> {
+        if level > 2 || !vaddr.is_aligned_to_level(level) || !paddr.is_aligned_to_level(level) {
+            return Err(PageError::UnalignedAddress);
+        }
+        if !flags.is_valid_leaf() {
+            return Err(PageError::InvalidFlags);
+        }
+
+        let mut table = self as *mut PageTable;
+        for lvl in ((level + 1)..=2).rev() {
+            let entry = unsafe { &mut (*table).entries[vaddr.vpn(lvl)] };
+            if !entry.valid() {
                 let page = zalloc(1);
-                *v = Entry::new(page as usize, Attribute::Valid as usize);
+                if page.is_null() {
+                    return Err(PageError::OutOfMemory);
+                }
+                *entry = Entry::new(PhysAddr(page as usize), PteFlags::VALID);
+            } else if entry.is_leaf() {
+                return Err(PageError::SuperpageConflict);
             }
-            let entry = v.physical_addr().0 as *mut Entry;
-            v = unsafe { entry.add(vpn.index(lvl)).as_mut().unwrap() };
+            table = phys_to_virt(entry.physical_addr());
         }
-        *v = Entry::new(paddr, flags | Attribute::Valid as usize);
+
+        let leaf = unsafe { &mut (*table).entries[vaddr.vpn(level)] };
+        if leaf.valid() && leaf.is_branch() {
+            return Err(PageError::SuperpageConflict);
+        }
+
+        let merged_flags =
+            if merge_existing && leaf.valid() && leaf.is_leaf() && leaf.physical_addr() == paddr {
+                leaf.flags().union(flags)
+            } else {
+                flags
+            };
+        *leaf = Entry::new(paddr, merged_flags.union(PteFlags::VALID));
+        Ok(())
     }
 
-    pub fn map_range(&mut self, start: usize, end: usize, vstart: usize, flags: usize) {
-        info!("\t{}->{} ({})", start, end, end - start);
-        let mut memaddr = start & !(PAGE_SIZE - 1);
-        let mut vstart = vstart & !(PAGE_SIZE - 1);
-
-        let pages = (align_val_down(end, 12) - memaddr) / PAGE_SIZE;
-
-        for _ in 0..pages {
-            self.map_addr(vstart, memaddr, flags, 0);
-            memaddr += 1 << 12;
-            vstart += 1 << 12;
-        }
+    /// Maps `[start, end)` -> `[vstart, ...)` using 1 GiB / 2 MiB superpages where aligned.
+    pub fn map_range(
+        &mut self,
+        start: usize,
+        end: usize,
+        vstart: usize,
+        flags: PteFlags,
+    ) -> Result<(), PageError> {
+        self.map_range_inner(start, end, vstart, flags, false)
     }
 
-    pub fn id_map_range(&mut self, region: &Region) {
+    fn map_range_inner(
+        &mut self,
+        start: usize,
+        end: usize,
+        vstart: usize,
+        flags: PteFlags,
+        merge_existing: bool,
+    ) -> Result<(), PageError> {
+        info!(
+            "\t0x{:X}->0x{:X} ({})",
+            start,
+            end,
+            end.saturating_sub(start)
+        );
+        if end <= start {
+            return Ok(());
+        }
+
+        let mut paddr = align_val_down(start, PAGE_ORDER);
+        let mut vaddr = align_val_down(vstart, PAGE_ORDER);
+        let pend = align_val(end, PAGE_ORDER);
+
+        while paddr < pend {
+            let remaining = pend - paddr;
+            let level = (1..=2)
+                .rev()
+                .find(|&lvl| {
+                    remaining >= LEVEL_SIZES[lvl]
+                        && PhysAddr(paddr).is_aligned_to_level(lvl)
+                        && VirtAddr(vaddr).is_aligned_to_level(lvl)
+                })
+                .unwrap_or(0);
+
+            self.map_addr_inner(
+                VirtAddr(vaddr),
+                PhysAddr(paddr),
+                flags,
+                level,
+                merge_existing,
+            )?;
+            paddr += LEVEL_SIZES[level];
+            vaddr += LEVEL_SIZES[level];
+        }
+        Ok(())
+    }
+
+    pub fn id_map_range(&mut self, region: &Region) -> Result<(), PageError> {
         info!(
             "\t{}: {:X}->{:X} ({})",
             region.name(),
@@ -272,63 +389,78 @@ impl PageTable {
             region.end_addr(),
             region.len()
         );
-        let mut memaddr = align_val_down(region.start_addr(), PAGE_ORDER);
-        let num_pages = (align_val(region.end_addr(), PAGE_ORDER) - memaddr) / PAGE_SIZE;
-        (0..num_pages).for_each(|_| {
-            self.map_addr(memaddr, memaddr, region.flags() as usize, 0);
-            memaddr += PAGE_SIZE;
-        });
+        // Merge permissions if adjacent linker sections share a 4 KiB boundary page.
+        self.map_range_inner(
+            region.start_addr(),
+            region.end_addr(),
+            region.start_addr(),
+            region.flags(),
+            true,
+        )
     }
 
-    pub fn id_map_ranges<'a, I>(&mut self, arr: I)
+    pub fn id_map_ranges<'a, I>(&mut self, arr: I) -> Result<(), PageError>
     where
         I: Iterator<Item = &'a Region>,
     {
-        arr.into_iter().for_each(|region| {
-            self.id_map_range(region);
-        });
-    }
-
-    pub fn map_ranges<I>(&mut self, iter: I)
-    where
-        I: Iterator<Item = (usize, usize, usize, usize)>,
-    {
-        iter.for_each(|range| {
-            let (start, end, vstart, flags) = range;
-            self.map_range(start, end, vstart, flags);
-        });
-    }
-
-    pub fn mark(&mut self, start: usize, end: usize, flags: usize) {
-        let mut memaddr = align_val(start, PAGE_ORDER);
-        let mut start = align_page_down(start);
-
-        let pages = (align_val(end, 12) - memaddr) / PAGE_ORDER;
-
-        for _ in 0..pages {
-            self.map_addr(start, memaddr, flags, 0);
-            memaddr += 1 << 12;
-            start += 1 << 12;
+        for region in arr {
+            self.id_map_range(region)?;
         }
+        Ok(())
     }
 
-    pub fn phy_addr_of(&self, vaddr: usize) -> Option<usize> {
-        assert!(
-            vaddr.is_multiple_of(PAGE_SIZE),
-            "virtual address {:x} not aligned",
-            vaddr
-        );
+    pub fn map_ranges<I>(&mut self, iter: I) -> Result<(), PageError>
+    where
+        I: Iterator<Item = (usize, usize, usize, PteFlags)>,
+    {
+        for (start, end, vstart, flags) in iter {
+            self.map_range(start, end, vstart, flags)?;
+        }
+        Ok(())
+    }
 
-        let vpn = VPN(vaddr);
-        let mut v = &self.entries[vpn.vpn2()];
-        for lvl in (0..2).rev() {
-            if !v.valid() {
+    pub fn mark(&mut self, start: usize, end: usize, flags: PteFlags) -> Result<(), PageError> {
+        self.map_range(start, end, start, flags)
+    }
+
+    /// Translates any virtual address (including non-page-aligned and superpage addresses).
+    pub fn phy_addr_of(&self, vaddr: VirtAddr) -> Option<PhysAddr> {
+        let mut table = self as *const PageTable;
+        for lvl in (0..=2).rev() {
+            let entry = unsafe { (*table).entries[vaddr.vpn(lvl)] };
+            if !entry.valid() {
                 return None;
             }
-            let entry = v.physical_addr().0 as *mut Entry;
-            v = unsafe { entry.add(vpn.index(lvl)).as_mut().unwrap() };
+            if entry.is_leaf() {
+                return Some(PhysAddr(entry.physical_addr().0 | vaddr.offset(lvl)));
+            }
+            if lvl == 0 {
+                return None;
+            }
+            table = phys_to_virt(entry.physical_addr()) as *const PageTable;
         }
-        Some(v.physical_addr().0)
+        None
+    }
+
+    /// Unmaps a single leaf mapping containing `vaddr` and invalidates its TLB entry.
+    pub fn unmap_addr(&mut self, vaddr: VirtAddr) -> bool {
+        let mut table = self as *mut PageTable;
+        for lvl in (0..=2).rev() {
+            let entry = unsafe { &mut (*table).entries[vaddr.vpn(lvl)] };
+            if !entry.valid() {
+                return false;
+            }
+            if entry.is_leaf() {
+                *entry = Entry(0);
+                riscv::asm::sfence_vma(0, vaddr.0);
+                return true;
+            }
+            if lvl == 0 {
+                return false;
+            }
+            table = phys_to_virt(entry.physical_addr());
+        }
+        false
     }
 
     pub fn dump(&self) {
@@ -337,64 +469,59 @@ impl PageTable {
         info!("----- End of Page Table -----");
     }
 
-    fn _dump(&self, level: usize, vpn: usize) {
+    fn _dump(&self, level: usize, vpn_prefix: usize) {
         for (i, &v) in self.entries.iter().enumerate().filter(|(_, v)| v.valid()) {
+            let full_vpn = (vpn_prefix << 9) | i;
+            let raw_vaddr = full_vpn << (9 * level + PAGE_ORDER);
+            // Sv39 canonical sign extension from bit 38.
+            let vaddr = ((raw_vaddr as isize) << 25 >> 25) as usize;
+
             if v.is_leaf() {
                 let u_flag = if v.user() { "U" } else { "-" };
                 let r_flag = if v.readable() { "R" } else { "-" };
                 let w_flag = if v.writable() { "W" } else { "-" };
                 let x_flag = if v.executable() { "X" } else { "-" };
-                let vaddr = (vpn << 9 | i) << 12;
-                if vaddr != v.physical_addr().0 || true {
-                    for _ in 0..(2 - level) {
-                        print!(".");
-                    }
-                    println!(
-                        "{}: 0x{:X} -> 0x{:X} {}{}{}{}",
-                        i,
-                        vaddr,
-                        v.physical_addr().0,
-                        u_flag,
-                        r_flag,
-                        w_flag,
-                        x_flag,
-                    );
-                }
-            } else {
                 for _ in 0..(2 - level) {
                     print!(".");
                 }
                 println!(
-                    "{}: 0x{:X} -> 0x{:X}",
+                    "{}: 0x{:X} -> 0x{:X} {}{}{}{}",
                     i,
-                    (vpn | i) << (9 * level + 12),
-                    v.physical_addr().0
+                    vaddr,
+                    v.physical_addr().0,
+                    u_flag,
+                    r_flag,
+                    w_flag,
+                    x_flag,
                 );
+            } else {
+                for _ in 0..(2 - level) {
+                    print!(".");
+                }
+                println!("{}: 0x{:X} -> 0x{:X}", i, vaddr, v.physical_addr().0);
 
-                let table = v.physical_addr().0 as *const Self;
-                let table = unsafe { table.as_ref().unwrap() };
                 if level != 0 {
-                    table._dump(level - 1, (vpn << 9) | i);
+                    let table = unsafe { &*phys_to_virt(v.physical_addr()) };
+                    table._dump(level - 1, full_vpn);
                 }
             }
         }
     }
 
-    pub fn unmap(root: &mut PageTable) {
-        for lv2 in root.entries.iter().take(PageTable::len()) {
+    /// Frees all child page-table pages and clears every entry in `self`.
+    pub fn clear(&mut self) {
+        for lv2 in self.entries.iter_mut() {
             if lv2.valid() && lv2.is_branch() {
-                let memaddr_lv1 = (lv2.get_entry() & !0x3ff) << 2;
-
-                let table_lv1 = unsafe { (memaddr_lv1 as *mut PageTable).as_mut().unwrap() };
-
-                for lv1 in table_lv1.entries.iter().take(PageTable::len()) {
+                let table_lv1 = unsafe { &mut *phys_to_virt(lv2.physical_addr()) };
+                for lv1 in table_lv1.entries.iter_mut() {
                     if lv1.valid() && lv1.is_branch() {
-                        let memaddr_lv0 = (lv1.get_entry() & !0x3ff) << 2;
-                        dealloc(memaddr_lv0 as *mut u8, 1);
+                        dealloc(phys_to_virt(lv1.physical_addr()) as *mut u8, 1);
+                        *lv1 = Entry(0);
                     }
                 }
-                dealloc(memaddr_lv1 as *mut u8, 1);
+                dealloc(table_lv1 as *mut PageTable as *mut u8, 1);
             }
+            *lv2 = Entry(0);
         }
     }
 }

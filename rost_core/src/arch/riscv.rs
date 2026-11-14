@@ -3,10 +3,19 @@ use crate::consts::PAGE_SIZE;
 use core::arch::asm;
 use core::time::Duration;
 
+#[repr(usize)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum SatpMode {
+    Bare = 0,
+    Sv39 = 8,
+    Sv48 = 9,
+    Sv57 = 10,
+}
+
 /// Build satp value from mode, asid and page table base addr
-pub fn build_satp(mode: usize, asid: usize, addr: usize) -> usize {
+pub fn build_satp(mode: SatpMode, asid: usize, addr: usize) -> usize {
     assert!(addr.is_multiple_of(PAGE_SIZE));
-    mode << 60 | (asid & 0xffff) << 44 | (addr >> 12) & 0xff_ffff_ffff
+    (mode as usize) << 60 | (asid & 0xffff) << 44 | ((addr >> 12) & 0xfff_ffff_ffff)
 }
 
 pub fn wait() {

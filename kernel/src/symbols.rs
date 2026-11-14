@@ -40,11 +40,11 @@ pub fn TEXT_START() -> usize {
 }
 
 pub fn RODATA_START() -> usize {
-    unsafe { &__sdata as *const u8 as usize }
+    unsafe { &__srodata as *const u8 as usize }
 }
 
 pub fn RODATA_END() -> usize {
-    unsafe { &__edata as *const u8 as usize }
+    DATA_START()
 }
 pub fn DATA_START() -> usize {
     unsafe { &__sdata as *const u8 as usize }
