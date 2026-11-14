@@ -343,12 +343,6 @@ impl PageTable {
         flags: PteFlags,
         merge_existing: bool,
     ) -> Result<(), PageError> {
-        info!(
-            "\t0x{:X}->0x{:X} ({})",
-            start,
-            end,
-            end.saturating_sub(start)
-        );
         if end <= start {
             return Ok(());
         }
